@@ -51,7 +51,6 @@ local function enforceTopMost()
 end
 task.spawn(enforceTopMost)
 
--- 界面缩小：主窗口尺寸从 420x480 -> 320x360
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0,320,0,360)
@@ -65,7 +64,7 @@ mainUICorner.CornerRadius = UDim.new(0,12)
 
 local TitleBar = Instance.new("Frame")
 TitleBar.Name = "TitleBar"
-TitleBar.Size = UDim2.new(1,0,0,48) -- 高度缩小
+TitleBar.Size = UDim2.new(1,0,0,48)
 TitleBar.BackgroundColor3 = Color3.fromRGB(255,240,245)
 TitleBar.BorderSizePixel = 0
 TitleBar.Parent = MainFrame
@@ -79,7 +78,7 @@ Title.BackgroundTransparency = 1
 Title.Text = "Link.cc"
 Title.TextColor3 = Color3.fromRGB(120,28,110)
 Title.Font = Enum.Font.GothamBold
-Title.TextSize = 18 -- 字号缩小
+Title.TextSize = 18
 Title.Parent = TitleBar
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Position = UDim2.new(0,12,0,0)
@@ -143,18 +142,16 @@ local function createInfoLabel(text)
     label.Text = text
     label.TextColor3 = Color3.fromRGB(160,80,200)
     label.Font = Enum.Font.Gotham
-    label.TextSize = 12 -- 缩小字号
+    label.TextSize = 12
     label.TextXAlignment = Enum.TextXAlignment.Left
     label.Parent = frame
     return label, frame
 end
 
--- 信息标签
 local InfoLabel, _ = createInfoLabel("状态：未启用")
 local WeaponCheckLabel, _ = createInfoLabel("手持武器检测：无目标武器")
 local WhitelistLabel, _ = createInfoLabel("白名单：无")
 
--- 开关创建函数（调整尺寸与字号）
 local function createSwitch(labelText, initial)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(1,-12,0,54)
@@ -221,7 +218,6 @@ local function createSwitch(labelText, initial)
     }
 end
 
--- 滑块创建函数（缩小高度与字号）
 local function createSlider(labelText, minVal, maxVal, initial)
     local container = Instance.new("Frame")
     container.Size = UDim2.new(1,-12,0,70)
@@ -352,16 +348,14 @@ local function createSlider(labelText, minVal, maxVal, initial)
     }
 end
 
--- 白名单数据结构（UserId -> true）
 local whitelist = {}
-local whitelistButtons = {} -- UserId -> button
+local whitelistButtons = {}
 
 local function isWhitelisted(plr)
     if not plr then return false end
     return whitelist[plr.UserId] == true
 end
 
--- 创建白名单选择面板（高度相应缩小）
 local function createWhitelistSection()
     local container = Instance.new("Frame")
     container.Size = UDim2.new(1,-12,0,110)
@@ -431,7 +425,6 @@ local function createWhitelistSection()
                 whitelist[uid] = true
             end
             updateVisual()
-            -- 更新显示
             local names = {}
             for id,_ in pairs(whitelist) do
                 local p = Players:GetPlayerByUserId(id)
@@ -448,14 +441,12 @@ local function createWhitelistSection()
         updateVisual()
     end
 
-    -- 初始化现有玩家
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer then
             makePlayerButton(plr)
         end
     end
 
-    -- 监听玩家加入/离开
     Players.PlayerAdded:Connect(function(plr)
         task.delay(0.05, function()
             makePlayerButton(plr)
@@ -481,18 +472,15 @@ local function createWhitelistSection()
     end)
 end
 
--- 先创建白名单面板（所以它会在界面上靠前）
 createWhitelistSection()
 
--- 开关：保留之前的开关（删除命中偏移相关），新增启用武器原生速度开关
 local AlwaysHeadSwitch = createSwitch("始终攻击头部", false)
 local AutoSwitch = createSwitch("杀戮光环", false)
 local SilentSwitch = createSwitch("静默转向", false)
 local TeamCheckSwitch = createSwitch("队伍检查", false)
-local UseNativeSpeedSwitch = createSwitch("使用武器原生攻击速度", false) -- 新开关
+local UseNativeSpeedSwitch = createSwitch("使用武器原生攻击速度", false)
 
--- 滑块：按新顺序排列（删除命中偏移滑块）
-local RangeSlider = createSlider("攻击距离", 0, 14, 14) -- 上限 14
+local RangeSlider = createSlider("攻击距离", 0, 14, 14)
 local SilentRangeSlider = createSlider("静默转向触发范围", 0, 20, 10)
 local MultiTargetSlider = createSlider("同时攻击目标数", 1, 3, 1)
 local CooldownSlider = createSlider("攻击冷却", 0.5, 5, 0.5)
@@ -502,22 +490,25 @@ local autoAttack = false
 local silentAim = false
 local teamCheck = false
 local alwaysHead = false
-local useNativeSpeed = false -- 新变量：是否启用武器原生攻击速度
+local useNativeSpeed = false
 local attackRange = 14
 local attackCoolDown = 0.5
 local maxTargets = 1
 local silentRange = 10
 local silentCooldown = 0
+
 local weaponList = {"Metal Shard","Stunstick","Riot Control","Door & Glass Shard","Glass Fragment"}
 local character, rootPart
 local lastAttackTime = 0
 local lastSilentTime = 0
 
-local aimTarget = nil -- 预瞄目标（用于提高反应速度）
+local lockedTargets = nil
+local attackLockExpire = 0
 
--- weapon hooks 管理
-local weaponHooks = {}     -- tool -> {connections}
-local weaponInfo = {}      -- tool -> info table (swing, pullout, anim, name, lastManual)
+local aimTarget = nil
+
+local weaponHooks = {}
+local weaponInfo = {}
 local currentHookedTool = nil
 
 local ToolSoundEvent = ReplicatedStorage:WaitForChild("Remote"):WaitForChild("ToolSound")
@@ -525,7 +516,6 @@ local ServiceFolder = ReplicatedStorage:WaitForChild("Service")
 local NamespaceModule = require(ServiceFolder:WaitForChild("Namespaces"))
 local MeleeSendHit = NamespaceModule.MeleeReplication.packets.sendHit.send
 
--- melee 武器配置（用于获取原生 swing cooldown 及默认播放音效）
 local meleeWeaponConfig = {
     ["Glass Fragment"] = {
         SwingCooldownAttribute = "SwingCooldown",
@@ -598,7 +588,6 @@ if LocalPlayer.Character then
 end
 LocalPlayer.CharacterAdded:Connect(refreshChar)
 
--- hook 单把武器：监听 Equipped/Unequipped/Activated/AttributeChanged/Destroy
 local function unhookWeapon(tool)
     if not tool then return end
     local conns = weaponHooks[tool]
@@ -616,12 +605,8 @@ local function hookWeapon(tool)
     if not tool or not tool:IsA("Tool") then return end
     if weaponHooks[tool] then return end
     local conns = {}
-
-    -- 初始化 info
     weaponInfo[tool] = weaponInfo[tool] or {}
     weaponInfo[tool].name = tool.Name
-
-    -- 读取初始属性（若存在）
     pcall(function()
         local swing = tool:GetAttribute("SwingCooldown")
         local pull = tool:GetAttribute("PulloutTime")
@@ -630,24 +615,17 @@ local function hookWeapon(tool)
         weaponInfo[tool].pull = tonumber(pull) or weaponInfo[tool].pull
         weaponInfo[tool].anim = tostring(anim) ~= "nil" and tostring(anim) or weaponInfo[tool].anim
     end)
-
-    -- Equipped: 更新显示
     table.insert(conns, tool.Equipped:Connect(function()
         weaponInfo[tool].equipped = true
         WeaponCheckLabel.Text = "手持武器检测："..tostring(tool.Name)
     end))
-
     table.insert(conns, tool.Unequipped:Connect(function()
         weaponInfo[tool].equipped = false
         WeaponCheckLabel.Text = "手持武器检测：无目标武器"
     end))
-
-    -- Activated: 记录手动使用时间，避免和自动攻击冲突（或用于节奏判断）
     table.insert(conns, tool.Activated:Connect(function()
         weaponInfo[tool].lastManual = os.clock()
     end))
-
-    -- AttributeChanged: 动态更新 info
     if tool.GetAttribute and tool.AttributeChanged then
         table.insert(conns, tool.AttributeChanged:Connect(function(attr)
             pcall(function()
@@ -663,19 +641,15 @@ local function hookWeapon(tool)
             end)
         end))
     end
-
-    -- 若 Tool 被销毁，取消 hook
     table.insert(conns, tool.AncestryChanged:Connect(function(child, parent)
         if not tool:IsDescendantOf(game) then
             unhookWeapon(tool)
         end
     end))
-
     weaponHooks[tool] = conns
     currentHookedTool = tool
 end
 
--- 监视当前手持武器变化并自动 hook/unhook
 spawn(function()
     local prevTool = nil
     while true do
@@ -702,6 +676,48 @@ spawn(function()
         end
         task.wait(0.12)
     end
+end)
+
+local function hookAllTools()
+    if LocalPlayer.Character then
+        for _, obj in ipairs(LocalPlayer.Character:GetChildren()) do
+            if obj and obj:IsA("Tool") then
+                pcall(function()
+                    if isMeleeTool(obj) then hookWeapon(obj) end
+                end)
+            end
+        end
+    end
+    if LocalPlayer:FindFirstChild("Backpack") then
+        for _, obj in ipairs(LocalPlayer.Backpack:GetChildren()) do
+            if obj and obj:IsA("Tool") then
+                pcall(function()
+                    if isMeleeTool(obj) then hookWeapon(obj) end
+                end)
+            end
+        end
+        LocalPlayer.Backpack.ChildAdded:Connect(function(child)
+            task.delay(0.05, function()
+                if child and child:IsA("Tool") then
+                    pcall(function() if isMeleeTool(child) then hookWeapon(child) end end)
+                end
+            end)
+        end)
+    end
+    if LocalPlayer.Character then
+        LocalPlayer.Character.ChildAdded:Connect(function(child)
+            task.delay(0.05, function()
+                if child and child:IsA("Tool") then
+                    pcall(function() if isMeleeTool(child) then hookWeapon(child) end end)
+                end
+            end)
+        end)
+    end
+end
+
+task.spawn(function()
+    task.wait(0.05)
+    pcall(hookAllTools)
 end)
 
 spawn(function()
@@ -829,14 +845,12 @@ local function getHeldWeapon()
     return nil
 end
 
--- 视线检测函数：若从 attackerRoot 到 targetPart 有遮挡（非目标角色本身），则返回 false
 local function hasLineOfSight(attackerRoot, targetPart)
     if not attackerRoot or not targetPart then return false end
     local dir = targetPart.Position - attackerRoot.Position
     if dir.Magnitude <= 0 then return true end
     local params = RaycastParams.new()
     params.FilterType = Enum.RaycastFilterType.Blacklist
-    -- 忽略攻击者自身以免检测到自己的腰带等
     if character then
         params.FilterDescendantsInstances = {character}
     else
@@ -854,7 +868,6 @@ local function hasLineOfSight(attackerRoot, targetPart)
 end
 
 local function findTargetLimb(char, preferHead)
-    -- 若 preferHead 为 true，则优先返回 Head 部位（若存在）
     if preferHead then
         local head = char:FindFirstChild("Head") or char:FindFirstChild("head")
         if head then
@@ -865,45 +878,37 @@ local function findTargetLimb(char, preferHead)
     if not limb then
         limb = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
     end
-    -- 最后仍可尝试 Head 作为后备
     if not limb then
         limb = char:FindFirstChild("Head") or char:FindFirstChild("head")
     end
     return limb
 end
 
--- 强化目标选择：使用评分机制综合判断（距离、头部可见性、生命值、是否处于前方、是否为预瞄目标）
 local function collectTargets(maxCount, maxRange)
     if not rootPart then return {} end
     local results = {}
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character then
             if isWhitelisted(plr) then
-                -- 跳过白名单玩家
             else
                 local tarRoot = plr.Character:FindFirstChild("HumanoidRootPart")
                 local tarHum = plr.Character:FindFirstChild("Humanoid")
                 if tarRoot and tarHum and tarHum.Health > 0 and tarHum:GetState() ~= Enum.HumanoidStateType.Dead then
                     if teamCheck then
                         if LocalPlayer.Team and plr.Team and LocalPlayer.Team == plr.Team then
-                            -- 同队跳过
                         else
                             local dis = (rootPart.Position - tarRoot.Position).Magnitude
                             if dis <= maxRange then
                                 local limb = findTargetLimb(plr.Character, true)
                                 if limb and hasLineOfSight(rootPart, limb) then
-                                    -- 评分
                                     local score = dis
-                                    -- 头部可见优先
                                     local head = plr.Character:FindFirstChild("Head") or plr.Character:FindFirstChild("head")
                                     if head and hasLineOfSight(rootPart, head) then
                                         score = score - 3.0
                                     end
-                                    -- 生命值低优先
                                     if tarHum.Health and tarHum.MaxHealth and tarHum.Health < (tarHum.MaxHealth * 0.5) then
                                         score = score - 2.0
                                     end
-                                    -- 是否在前方（更容易命中）
                                     local toTarget = (tarRoot.Position - rootPart.Position)
                                     if toTarget.Magnitude > 0 then
                                         local dir = toTarget.Unit
@@ -913,7 +918,6 @@ local function collectTargets(maxCount, maxRange)
                                             score = score - 1.5
                                         end
                                     end
-                                    -- 预瞄目标优先
                                     if aimTarget and aimTarget == plr then
                                         score = score - 4.0
                                     end
@@ -956,7 +960,6 @@ local function collectTargets(maxCount, maxRange)
         end
     end
     table.sort(results, function(a,b)
-        -- 先按 score 排序，若 score 相同则按距离
         if a.score == b.score then
             return a.dist < b.dist
         end
@@ -969,7 +972,6 @@ local function collectTargets(maxCount, maxRange)
     return out
 end
 
--- 预测函数：依据目标速度进行简单线性预测（减少移动时的瞄准误差）
 local function predictTargetPosition(tarRoot, tarLimb, predictionFactor)
     if not tarRoot or not tarLimb then return tarLimb and tarLimb.Position or (tarRoot and tarRoot.Position) end
     predictionFactor = predictionFactor or 0.9
@@ -982,17 +984,105 @@ local function predictTargetPosition(tarRoot, tarLimb, predictionFactor)
         end
     end)
     local dist = (tarRoot.Position - rootPart.Position).Magnitude
-    -- lead time scales with distance but bounded
     local lead = math.clamp(dist / 20, 0, 1.6) * predictionFactor
     return tarLimb.Position + vel * lead
 end
 
--- 合并：渲染帧内处理静默转向与预瞄（提升反应速度）
+local hitQueue = {}
+local hitFlushInterval = 0.5
+
+local function enqueueHit(payload)
+    if not payload or not payload.tarHum then return end
+    payload.snapshotHealth = payload.tarHum.Health
+    table.insert(hitQueue, payload)
+end
+
+task.spawn(function()
+    while true do
+        task.wait(hitFlushInterval)
+        if #hitQueue > 0 then
+            local toSend = hitQueue
+            hitQueue = {}
+            for _, entry in ipairs(toSend) do
+                if entry and entry.tarHum and entry.tarLimb and entry.tool then
+                    pcall(function()
+                        MeleeSendHit({entry.tarHum, entry.tarLimb, entry.tool})
+                    end)
+                    if entry.needCommit then
+                        task.wait(0.03)
+                        pcall(function()
+                            ToolSoundEvent:FireServer(entry.tool, "Commit")
+                        end)
+                    end
+                    task.wait(0.02)
+                end
+            end
+        end
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.05)
+        if #hitQueue > 0 then
+            for i = #hitQueue, 1, -1 do
+                local entry = hitQueue[i]
+                if entry and entry.tarHum and entry.snapshotHealth then
+                    local ok, cur = pcall(function() return entry.tarHum.Health end)
+                    if ok and type(cur) == "number" and cur < entry.snapshotHealth then
+                        pcall(function()
+                            MeleeSendHit({entry.tarHum, entry.tarLimb, entry.tool})
+                        end)
+                        if entry.needCommit then
+                            task.wait(0.02)
+                            pcall(function() ToolSoundEvent:FireServer(entry.tool, "Commit") end)
+                        end
+                        table.remove(hitQueue, i)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+local lastObservedHealth = {}
+
+local function reassignHitsFromPlayer(userId)
+    if not userId then return end
+    local indices = {}
+    for i,entry in ipairs(hitQueue) do
+        if entry and entry.tarPlayer and entry.tarPlayer.UserId == userId then
+            table.insert(indices, i)
+        end
+    end
+    if #indices == 0 then return end
+    local candidates = collectTargets(#indices, attackRange)
+    local idx = 1
+    for _, i in ipairs(indices) do
+        local entry = hitQueue[i]
+        if entry then
+            if candidates[idx] then
+                local repl = candidates[idx]
+                if repl and repl.Character then
+                    local tarHum = repl.Character:FindFirstChild("Humanoid")
+                    local limb = findTargetLimb(repl.Character, alwaysHead)
+                    if tarHum and limb then
+                        entry.tarHum = tarHum
+                        entry.tarLimb = limb
+                        entry.tarPlayer = repl
+                        entry.snapshotHealth = tarHum.Health
+                        idx = idx + 1
+                    end
+                end
+            else
+            end
+        end
+    end
+end
+
 RunService.RenderStepped:Connect(function()
     if not rootPart then return end
     local now = os.clock()
-
-    -- 静默转向逻辑（按原逻辑受冷却约束）
     if silentAim and now - lastSilentTime >= silentCooldown then
         local candidates = collectTargets(1, silentRange)
         local targetPlr = candidates[1]
@@ -1006,15 +1096,12 @@ RunService.RenderStepped:Connect(function()
             end
         end
     end
-
-    -- 预瞄：当启用自动攻击时，不改变冷却但持续面向最佳目标，减少实际攻击时的旋转延时（提高反应速度）
-    if autoAttack then
+    if autoAttack and silentAim then
         local candidates = collectTargets(1, attackRange)
         local preTarget = candidates[1]
         if preTarget and preTarget.Character then
             local tarLimb = findTargetLimb(preTarget.Character, alwaysHead)
             if tarLimb then
-                -- 预测位置以提升命中移动目标的概率
                 local tarRoot = preTarget.Character:FindFirstChild("HumanoidRootPart")
                 local predPos = predictTargetPosition(tarRoot, tarLimb, 0.9)
                 pcall(function()
@@ -1033,8 +1120,6 @@ end)
 RunService.Heartbeat:Connect(function()
     if not autoAttack or not rootPart then return end
     local now = os.clock()
-
-    -- 先获取当前持有武器，以便决定是否使用武器原生速度
     local heldTool = getHeldWeapon()
     if heldTool then
         pcall(function() WeaponCheckLabel.Text = "手持武器检测："..heldTool.Name end)
@@ -1042,8 +1127,6 @@ RunService.Heartbeat:Connect(function()
         pcall(function() WeaponCheckLabel.Text = "手持武器检测：无目标武器" end)
         return
     end
-
-    -- 计算当前冷却：默认 attackCoolDown，若启用武器原生速度且武器有效则使用其 cooldown
     local currentCooldown = attackCoolDown
     if useNativeSpeed and heldTool then
         local ok, val = pcall(function() return GetMeleeWeaponCooldown(heldTool) end)
@@ -1051,13 +1134,71 @@ RunService.Heartbeat:Connect(function()
             currentCooldown = val
         end
     end
-
     if now - lastAttackTime < currentCooldown then return end
-
-    local targets = collectTargets(maxTargets, attackRange)
-    if #targets == 0 then return end
-
-    for idx, targetPlr in ipairs(targets) do
+    local targetsToAttack = {}
+    local leftPlayers = {}
+    if lockedTargets and now < attackLockExpire then
+        for _, plr in ipairs(lockedTargets) do
+            if plr and plr.Character then
+                local tarRoot = plr.Character:FindFirstChild("HumanoidRootPart")
+                local tarHum = plr.Character:FindFirstChild("Humanoid")
+                if tarRoot and tarHum and tarHum.Health > 0 and tarHum:GetState() ~= Enum.HumanoidStateType.Dead then
+                    if (rootPart.Position - tarRoot.Position).Magnitude <= attackRange then
+                        local limb = findTargetLimb(plr.Character, alwaysHead)
+                        if limb and hasLineOfSight(rootPart, limb) then
+                            table.insert(targetsToAttack, plr)
+                        end
+                    else
+                        table.insert(leftPlayers, plr)
+                    end
+                else
+                    table.insert(leftPlayers, plr)
+                end
+            end
+            if #targetsToAttack >= maxTargets then break end
+        end
+        if #targetsToAttack == 0 then
+            lockedTargets = nil
+            attackLockExpire = 0
+        else
+            for _, left in ipairs(leftPlayers) do
+                if left and left.UserId then
+                    reassignHitsFromPlayer(left.UserId)
+                end
+            end
+        end
+    end
+    if (not lockedTargets) or (#targetsToAttack == 0) then
+        local newTargets = collectTargets(maxTargets, attackRange)
+        if #newTargets == 0 then
+            return
+        end
+        lockedTargets = newTargets
+        attackLockExpire = now + currentCooldown
+        for _, plr in ipairs(lockedTargets) do
+            if plr and plr.Character then
+                local tarRoot = plr.Character:FindFirstChild("HumanoidRootPart")
+                local tarHum = plr.Character:FindFirstChild("Humanoid")
+                if tarRoot and tarHum and tarHum.Health > 0 and tarHum:GetState() ~= Enum.HumanoidStateType.Dead then
+                    if (rootPart.Position - tarRoot.Position).Magnitude <= attackRange then
+                        local limb = findTargetLimb(plr.Character, alwaysHead)
+                        if limb and hasLineOfSight(rootPart, limb) then
+                            table.insert(targetsToAttack, plr)
+                            lastObservedHealth[plr.UserId] = tarHum.Health
+                        end
+                    end
+                end
+            end
+            if #targetsToAttack >= maxTargets then break end
+        end
+        if #targetsToAttack == 0 then
+            lockedTargets = nil
+            attackLockExpire = 0
+            return
+        end
+    end
+    lastAttackTime = now
+    for idx, targetPlr in ipairs(targetsToAttack) do
         if not targetPlr or not targetPlr.Character then
         else
             local tarChar = targetPlr.Character
@@ -1065,60 +1206,50 @@ RunService.Heartbeat:Connect(function()
             local tarLimb = findTargetLimb(tarChar, alwaysHead)
             if not tarHum or not tarLimb then
             else
-                if silentAim then
-                    pcall(function()
-                        rootPart.CFrame = CFrame.new(rootPart.Position, tarLimb.Position)
-                    end)
-                end
-
-                -- 使用 weaponInfo（若有）做轻量优化：优先使用预测位置、若有 PulloutTime 可做短暂等待（但不修改冷却）
                 local info = weaponInfo[heldTool] or {}
                 local tarRoot = tarChar:FindFirstChild("HumanoidRootPart")
                 local aimPos = predictTargetPosition(tarRoot, tarLimb, 1.0)
-                pcall(function() rootPart.CFrame = CFrame.new(rootPart.Position, aimPos) end)
-
-                -- 播放/触发武器声音、动画同步
-                -- 若启用了武器原生速度并且配置存在，则使用 FireMeleeWeaponSound 来按配置触发（更贴合武器原生节奏）
                 local firedSoundByConfig = false
                 if useNativeSpeed and heldTool and meleeWeaponConfig[heldTool.Name] then
                     pcall(function() FireMeleeWeaponSound(heldTool) end)
                     firedSoundByConfig = true
                 end
-
+                local needCommit = false
                 if not firedSoundByConfig then
-                    -- 退回原逻辑
                     if heldTool.Name == "Glass Fragment" then
                         pcall(function() ToolSoundEvent:FireServer(heldTool, "Swing") end)
+                        needCommit = false
                     else
                         pcall(function() ToolSoundEvent:FireServer(heldTool, "Plan") end)
-                        task.wait(0.03)
+                        needCommit = true
                     end
                 end
-
-                pcall(function()
-                    -- 直接使用目标肢体
-                    MeleeSendHit({tarHum, tarLimb, heldTool})
-                end)
-
-                if not firedSoundByConfig and heldTool.Name ~= "Glass Fragment" then
-                    task.wait(0.03)
-                    pcall(function() ToolSoundEvent:FireServer(heldTool, "Commit") end)
+                local uid = targetPlr.UserId
+                local prevHealth = lastObservedHealth[uid] or tarHum.Health
+                if tarHum.Health < prevHealth then
+                    pcall(function()
+                        MeleeSendHit({tarHum, tarLimb, heldTool})
+                    end)
+                    if needCommit then
+                        task.wait(0.03)
+                        pcall(function() ToolSoundEvent:FireServer(heldTool, "Commit") end)
+                    end
+                else
+                    enqueueHit({
+                        tarHum = tarHum,
+                        tarLimb = tarLimb,
+                        tool = heldTool,
+                        needCommit = needCommit,
+                        tarPlayer = targetPlr
+                    })
                 end
-
-                -- 若武器声明了 RegisterOnce = true，略微停止发送重复（兼容性保护）
-                if heldTool:GetAttribute("RegisterOnce") then
-                    -- do nothing extra; just respect the single send
-                end
-
-                if idx < #targets then
+                lastObservedHealth[uid] = tarHum.Health
+                if idx < #targetsToAttack then
                     task.wait(0.02)
                 end
             end
         end
     end
-
-    -- 更新 lastAttackTime 为现在（下一次攻击将受 currentCooldown 控制）
-    lastAttackTime = now
 end)
 
 local collapsed = false

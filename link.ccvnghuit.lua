@@ -486,6 +486,9 @@ local MultiTargetSlider = createSlider("同时攻击目标数", 1, 3, 1)
 local CooldownSlider = createSlider("攻击冷却", 0.5, 5, 0.5)
 local SilentCooldownSlider = createSlider("静默转向冷却", 0, 5, 0)
 
+-- 新增：命中发送延迟滑块（0.00 - 1.00 秒，默认 0.00 最快）
+local SendDelaySlider = createSlider("命中发送延迟", 0, 1, 0)
+
 local autoAttack = false
 local silentAim = false
 local teamCheck = false
@@ -496,6 +499,9 @@ local attackCoolDown = 0.5
 local maxTargets = 1
 local silentRange = 10
 local silentCooldown = 0
+
+-- 将原来固定的 hitFlushInterval (0.5) 改为可配置，默认 0（最快）
+local hitFlushInterval = 0
 
 local weaponList = {"Metal Shard","Stunstick","Riot Control","Door & Glass Shard","Glass Fragment"}
 local character, rootPart
@@ -806,6 +812,12 @@ spawn(function()
         silentCooldown = math.floor(sc * 100 + 0.5) / 100
         SilentCooldownSlider.ValueLabel.Text = string.format("%.2f s", silentCooldown)
 
+        -- 更新命中发送延迟（与攻击冷却分离）
+        local sendDelay = SendDelaySlider.Get() or 0
+        sendDelay = math.clamp(sendDelay, 0, 1)
+        hitFlushInterval = math.floor(sendDelay * 100 + 0.5) / 100
+        SendDelaySlider.ValueLabel.Text = string.format("%.2f s", hitFlushInterval)
+
         task.wait(0.12)
     end
 end)
@@ -989,7 +1001,8 @@ local function predictTargetPosition(tarRoot, tarLimb, predictionFactor)
 end
 
 local hitQueue = {}
-local hitFlushInterval = 0.5
+-- hitFlushInterval 现在由 UI 控制（SendDelaySlider），默认 0（最快）
+-- local hitFlushInterval = 0 (定义在上面)
 
 local function enqueueHit(payload)
     if not payload or not payload.tarHum then return end
@@ -997,9 +1010,14 @@ local function enqueueHit(payload)
     table.insert(hitQueue, payload)
 end
 
+-- 使用动态等待：如果 hitFlushInterval <= 0 则使用 task.wait()（最快），否则按设定秒数等待
 task.spawn(function()
     while true do
-        task.wait(hitFlushInterval)
+        if hitFlushInterval and hitFlushInterval > 0 then
+            task.wait(hitFlushInterval)
+        else
+            task.wait()
+        end
         if #hitQueue > 0 then
             local toSend = hitQueue
             hitQueue = {}
@@ -1278,6 +1296,8 @@ if SilentRangeSlider and SilentRangeSlider.Set then SilentRangeSlider.Set(10) en
 if SilentCooldownSlider and SilentCooldownSlider.Set then SilentCooldownSlider.Set(0) end
 if AlwaysHeadSwitch and AlwaysHeadSwitch.Set then AlwaysHeadSwitch.Set(false) end
 if UseNativeSpeedSwitch and UseNativeSpeedSwitch.Set then UseNativeSpeedSwitch.Set(false) end
+-- 新增：默认命中发送延迟为 0（最快）
+if SendDelaySlider and SendDelaySlider.Set then SendDelaySlider.Set(0) end
 
 MainFrame.Active = true
 local draggingWindow = false

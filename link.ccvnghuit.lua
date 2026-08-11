@@ -503,7 +503,7 @@ local silentCooldown = 0
 -- 将原来固定的 hitFlushInterval (0.5) 改为可配置，默认 0（最快）
 local hitFlushInterval = 0
 
-local weaponList = {"Metal Shard","Stunstick","Riot Control","Door & Glass Shard","Glass Fragment"}
+local weaponList = {"Metal Shard","Stunstick","Riot Control","Door & Glass Shard","Glass Fragment", "Fireaxe"}
 local character, rootPart
 local lastAttackTime = 0
 local lastSilentTime = 0
@@ -547,6 +547,12 @@ local meleeWeaponConfig = {
         SwingCooldownAttribute = "SwingCooldown",
         Sound1 = "Plan",
         Sound2 = "Commit"
+    },
+    -- 适配 Fireaxe：使用 Equip -> Swing 的音效触发，且读取 SwingCooldown 属性
+    ["Fireaxe"] = {
+        SwingCooldownAttribute = "SwingCooldown",
+        Sound1 = "Equip",
+        Sound2 = "Swing"
     }
 }
 

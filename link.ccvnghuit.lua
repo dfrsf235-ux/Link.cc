@@ -1084,6 +1084,16 @@ local function predictTargetPosition(tarRoot, tarLimb, predictionFactor)
     return tarLimb.Position + vel * lead
 end
 
+-- 新增辅助：只允许偏航（左右）朝向目标，禁止上下（保持原高度）
+local function lookAtYawOnly(originPart, targetPos)
+    if not originPart or not targetPos then return end
+    pcall(function()
+        local origin = originPart.Position
+        local flatTarget = Vector3.new(targetPos.X, origin.Y, targetPos.Z)
+        originPart.CFrame = CFrame.new(origin, flatTarget)
+    end)
+end
+
 local hitQueue = {}
 
 local function enqueueHit(payload)
@@ -1189,7 +1199,8 @@ RunService.RenderStepped:Connect(function()
             local tarLimb = findTargetLimb(targetPlr.Character, alwaysHead)
             if tarLimb then
                 pcall(function()
-                    rootPart.CFrame = CFrame.new(rootPart.Position, tarLimb.Position)
+                    -- 只允许左右旋转：将目标位置投影到与 rootPart 相同的高度
+                    lookAtYawOnly(rootPart, tarLimb.Position)
                 end)
                 lastSilentTime = now
             end
@@ -1204,7 +1215,8 @@ RunService.RenderStepped:Connect(function()
                 local tarRoot = preTarget.Character:FindFirstChild("HumanoidRootPart")
                 local predPos = predictTargetPosition(tarRoot, tarLimb, 0.9)
                 pcall(function()
-                    rootPart.CFrame = CFrame.new(rootPart.Position, predPos)
+                    -- 只允许左右旋转：将预测位置投影到与 rootPart 相同的高度
+                    lookAtYawOnly(rootPart, predPos)
                 end)
                 aimTarget = preTarget
             end

@@ -1,3 +1,4 @@
+task.wait(2.6)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -486,7 +487,6 @@ local MultiTargetSlider = createSlider("同时攻击目标数", 1, 3, 1)
 local CooldownSlider = createSlider("攻击冷却", 0.5, 5, 0.5)
 local SilentCooldownSlider = createSlider("静默转向冷却", 0, 5, 0)
 
--- 新增：命中发送延迟滑块（0.00 - 1.00 秒，默认 0.00 最快）
 local SendDelaySlider = createSlider("命中发送延迟", 0, 1, 0)
 
 local autoAttack = false
@@ -500,7 +500,6 @@ local maxTargets = 1
 local silentRange = 10
 local silentCooldown = 0
 
--- 将原来固定的 hitFlushInterval (0.5) 改为可配置，默认 0（最快）
 local hitFlushInterval = 0
 
 local weaponList = {"Metal Shard","Stunstick","Riot Control","Door & Glass Shard","Glass Fragment", "Fireaxe"}
@@ -548,7 +547,6 @@ local meleeWeaponConfig = {
         Sound1 = "Plan",
         Sound2 = "Commit"
     },
-    -- 适配 Fireaxe：使用 Equip -> Swing 的音效触发，且读取 SwingCooldown 属性
     ["Fireaxe"] = {
         SwingCooldownAttribute = "SwingCooldown",
         Sound1 = "Equip",
@@ -559,24 +557,38 @@ local meleeWeaponConfig = {
 local function GetMeleeWeaponCooldown(tool)
     if not tool then return 0.5 end
     local cfg = meleeWeaponConfig[tool.Name]
-    if not cfg then return 0.5 end
-    local raw = nil
-    pcall(function() raw = tool:GetAttribute(cfg.SwingCooldownAttribute) end)
-    if raw then
-        local val = tonumber(raw)
-        if val and val > 0 then
-            return val
+    if cfg then
+        local raw = nil
+        pcall(function() raw = tool:GetAttribute(cfg.SwingCooldownAttribute) end)
+        if raw then
+            local val = tonumber(raw)
+            if val and val > 0 then
+                return val
+            end
+        end
+        local primary = tool:FindFirstChild("Primary")
+        if primary then
+            local fallback = nil
+            pcall(function() fallback = primary:GetAttribute(cfg.SwingCooldownAttribute) end)
+            if fallback then
+                local fval = tonumber(fallback)
+                if fval and fval > 0 then
+                    return fval
+                end
+            end
         end
     end
-    local primary = tool:FindFirstChild("Primary")
-    if primary then
-        local fallback = nil
-        pcall(function() fallback = primary:GetAttribute(cfg.SwingCooldownAttribute) end)
-        if fallback then
-            local fval = tonumber(fallback)
-            if fval and fval > 0 then
-                return fval
-            end
+    local tryVals = {}
+    pcall(function()
+        local a = tool:GetAttribute("SwingCooldown")
+        if a then table.insert(tryVals, tonumber(a)) end
+    end)
+    if weaponInfo[tool] and weaponInfo[tool].swing then
+        table.insert(tryVals, tonumber(weaponInfo[tool].swing))
+    end
+    for _, v in ipairs(tryVals) do
+        if v and type(v) == "number" and v > 0 then
+            return v
         end
     end
     return 0.5
@@ -818,7 +830,6 @@ spawn(function()
         silentCooldown = math.floor(sc * 100 + 0.5) / 100
         SilentCooldownSlider.ValueLabel.Text = string.format("%.2f s", silentCooldown)
 
-        -- 更新命中发送延迟（与攻击冷却分离）
         local sendDelay = SendDelaySlider.Get() or 0
         sendDelay = math.clamp(sendDelay, 0, 1)
         hitFlushInterval = math.floor(sendDelay * 100 + 0.5) / 100
@@ -1007,8 +1018,6 @@ local function predictTargetPosition(tarRoot, tarLimb, predictionFactor)
 end
 
 local hitQueue = {}
--- hitFlushInterval 现在由 UI 控制（SendDelaySlider），默认 0（最快）
--- local hitFlushInterval = 0 (定义在上面)
 
 local function enqueueHit(payload)
     if not payload or not payload.tarHum then return end
@@ -1016,7 +1025,6 @@ local function enqueueHit(payload)
     table.insert(hitQueue, payload)
 end
 
--- 使用动态等待：如果 hitFlushInterval <= 0 则使用 task.wait()（最快），否则按设定秒数等待
 task.spawn(function()
     while true do
         if hitFlushInterval and hitFlushInterval > 0 then
@@ -1302,8 +1310,19 @@ if SilentRangeSlider and SilentRangeSlider.Set then SilentRangeSlider.Set(10) en
 if SilentCooldownSlider and SilentCooldownSlider.Set then SilentCooldownSlider.Set(0) end
 if AlwaysHeadSwitch and AlwaysHeadSwitch.Set then AlwaysHeadSwitch.Set(false) end
 if UseNativeSpeedSwitch and UseNativeSpeedSwitch.Set then UseNativeSpeedSwitch.Set(false) end
--- 新增：默认命中发送延迟为 0（最快）
 if SendDelaySlider and SendDelaySlider.Set then SendDelaySlider.Set(0) end
+
+autoAttack = AutoSwitch and AutoSwitch.Get and AutoSwitch.Get() or autoAttack
+silentAim = SilentSwitch and SilentSwitch.Get and SilentSwitch.Get() or silentAim
+teamCheck = TeamCheckSwitch and TeamCheckSwitch.Get and TeamCheckSwitch.Get() or teamCheck
+alwaysHead = AlwaysHeadSwitch and AlwaysHeadSwitch.Get and AlwaysHeadSwitch.Get() or alwaysHead
+useNativeSpeed = UseNativeSpeedSwitch and UseNativeSpeedSwitch.Get and UseNativeSpeedSwitch.Get() or useNativeSpeed
+attackRange = RangeSlider and RangeSlider.Get and (math.floor((RangeSlider.Get() or attackRange) * 100 + 0.5) / 100) or attackRange
+attackCoolDown = CooldownSlider and CooldownSlider.Get and (math.floor((CooldownSlider.Get() or attackCoolDown) * 100 + 0.5) / 100) or attackCoolDown
+maxTargets = MultiTargetSlider and MultiTargetSlider.Get and math.clamp(math.floor((MultiTargetSlider.Get() or maxTargets)+0.5),1,3) or maxTargets
+silentRange = SilentRangeSlider and SilentRangeSlider.Get and (math.floor((SilentRangeSlider.Get() or silentRange) * 100 + 0.5) / 100) or silentRange
+silentCooldown = SilentCooldownSlider and SilentCooldownSlider.Get and (math.floor((SilentCooldownSlider.Get() or silentCooldown) * 100 + 0.5) / 100) or silentCooldown
+hitFlushInterval = SendDelaySlider and SendDelaySlider.Get and (math.floor((SendDelaySlider.Get() or hitFlushInterval) * 100 + 0.5) / 100) or hitFlushInterval
 
 MainFrame.Active = true
 local draggingWindow = false
@@ -1360,7 +1379,11 @@ do
     local overlayGui = Instance.new("ScreenGui")
     overlayGui.Name = "MeleeStartupOverlay"
     overlayGui.ResetOnSpawn = false
+    overlayGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+    overlayGui.DisplayOrder = 2147483647
+    overlayGui.IgnoreGuiInset = true
     overlayGui.Parent = CoreGui
+    overlayGui.Enabled = true
 
     local overlay = Instance.new("Frame")
     overlay.Name = "BlackOverlay"
@@ -1369,7 +1392,7 @@ do
     overlay.BackgroundColor3 = Color3.fromRGB(0,0,0)
     overlay.BackgroundTransparency = 1
     overlay.BorderSizePixel = 0
-    overlay.ZIndex = 999
+    overlay.ZIndex = overlayGui.DisplayOrder or 2147483647
     overlay.Parent = overlayGui
 
     local centerText = Instance.new("TextLabel")
@@ -1384,7 +1407,7 @@ do
     centerText.Font = Enum.Font.GothamBold
     centerText.TextSize = 72
     centerText.TextTransparency = 1
-    centerText.ZIndex = 1000
+    centerText.ZIndex = (overlay.ZIndex or 2147483647) + 1
     centerText.Parent = overlay
 
     local ok, err = pcall(function()
@@ -1402,7 +1425,7 @@ do
         tFloat:Play()
         tTextIn.Completed:Wait()
 
-        task.wait(15)
+        task.wait(120)
 
         local tTextOut = TweenService:Create(centerText, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1, TextStrokeTransparency = 1})
         tTextOut:Play()

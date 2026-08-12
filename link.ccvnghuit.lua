@@ -74,7 +74,7 @@ titleUICorner.CornerRadius = UDim.new(0,12)
 
 local Title = Instance.new("TextLabel")
 Title.Name = "Title"
-Title.Size = UDim2.new(1,0,1,0)
+Title.Size = UDim2.new(0,150,1,0)
 Title.BackgroundTransparency = 1
 Title.Text = "Link.cc"
 Title.TextColor3 = Color3.fromRGB(120,28,110)
@@ -84,6 +84,20 @@ Title.Parent = TitleBar
 Title.TextXAlignment = Enum.TextXAlignment.Left
 Title.Position = UDim2.new(0,12,0,0)
 Title.AnchorPoint = Vector2.new(0,0)
+
+local FPSLabel = Instance.new("TextLabel")
+FPSLabel.Name = "FPSLabel"
+FPSLabel.Size = UDim2.new(0,220,1,0)
+FPSLabel.Position = UDim2.new(0.5,0,0,0)
+FPSLabel.AnchorPoint = Vector2.new(0.5,0)
+FPSLabel.BackgroundTransparency = 1
+FPSLabel.Text = "FPS: -- | Ping: -- ms"
+FPSLabel.TextColor3 = Color3.fromRGB(120,28,110)
+FPSLabel.Font = Enum.Font.Gotham
+FPSLabel.TextSize = 14
+FPSLabel.TextXAlignment = Enum.TextXAlignment.Center
+FPSLabel.Parent = TitleBar
+FPSLabel.ZIndex = Title.ZIndex + 2
 
 local CollapseBtn = Instance.new("TextButton")
 CollapseBtn.Name = "CollapseBtn"
@@ -1425,7 +1439,7 @@ do
         tFloat:Play()
         tTextIn.Completed:Wait()
 
-        task.wait(120)
+        task.wait(20)
 
         local tTextOut = TweenService:Create(centerText, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1, TextStrokeTransparency = 1})
         tTextOut:Play()
@@ -1441,3 +1455,41 @@ do
 end
 
 ScreenGui.ResetOnSpawn = false
+
+local frameCount = 0
+local accTime = 0
+local lastFPS = 0
+RunService.RenderStepped:Connect(function(dt)
+    if dt and type(dt) == "number" then
+        frameCount = frameCount + 1
+        accTime = accTime + dt
+    end
+end)
+
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        local fps = 0
+        if accTime > 0 then
+            fps = math.floor(frameCount / math.max(accTime, 1e-6) + 0.5)
+        end
+        frameCount = 0
+        accTime = 0
+        lastFPS = fps
+        local pingMs = nil
+        local ok, res = pcall(function()
+            if LocalPlayer and LocalPlayer.GetNetworkPing then
+                return LocalPlayer:GetNetworkPing()
+            end
+            return nil
+        end)
+        if ok and type(res) == "number" then
+            pingMs = math.floor(res * 1000 + 0.5)
+        end
+        if pingMs then
+            FPSLabel.Text = string.format("FPS: %d | Ping: %d ms", lastFPS, pingMs)
+        else
+            FPSLabel.Text = string.format("FPS: %d | Ping: -- ms", lastFPS)
+        end
+    end
+end)

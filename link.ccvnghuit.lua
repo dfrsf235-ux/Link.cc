@@ -503,6 +503,10 @@ local SilentCooldownSlider = createSlider("静默转向冷却", 0, 5, 0)
 
 local SendDelaySlider = createSlider("命中发送延迟", 0, 1, 0)
 
+-- 新增：延迟补偿开关与系数滑块
+local LatencyCompSwitch = createSwitch("延迟补偿 (根据Ping调整)", false)
+local LatencyFactorSlider = createSlider("延迟补偿系数", 0.1, 3, 1.0)
+
 local autoAttack = false
 local silentAim = false
 local teamCheck = false
@@ -515,6 +519,10 @@ local silentRange = 10
 local silentCooldown = 0
 
 local hitFlushInterval = 0
+
+-- 延迟补偿相关变量
+local latencyCompEnabled = false
+local latencyFactor = 1.0
 
 local weaponList = {"Metal Shard","Stunstick","Riot Control","Door & Glass Shard","Glass Fragment", "Fireaxe"}
 local character, rootPart
@@ -819,6 +827,32 @@ spawn(function()
     end
 end)
 
+-- 监听延迟补偿开关
+spawn(function()
+    local prev = LatencyCompSwitch.Get()
+    while true do
+        local cur = LatencyCompSwitch.Get()
+        if cur ~= prev then
+            prev = cur
+            latencyCompEnabled = cur
+        end
+        task.wait(0.08)
+    end
+end)
+
+-- 监听延迟补偿系数滑块
+spawn(function()
+    local prev = LatencyFactorSlider.Get()
+    while true do
+        local cur = LatencyFactorSlider.Get()
+        if cur ~= prev then
+            prev = cur
+            latencyFactor = cur
+        end
+        task.wait(0.12)
+    end
+end)
+
 spawn(function()
     while true do
         local r = RangeSlider.Get() or 14
@@ -844,9 +878,28 @@ spawn(function()
         silentCooldown = math.floor(sc * 100 + 0.5) / 100
         SilentCooldownSlider.ValueLabel.Text = string.format("%.2f s", silentCooldown)
 
+        -- 处理命中发送延迟并加入延迟补偿（如果启用）
         local sendDelay = SendDelaySlider.Get() or 0
         sendDelay = math.clamp(sendDelay, 0, 1)
-        hitFlushInterval = math.floor(sendDelay * 100 + 0.5) / 100
+        local baseSendDelay = math.floor(sendDelay * 100 + 0.5) / 100
+
+        local pingSec = 0
+        local ok, res = pcall(function()
+            if LocalPlayer and LocalPlayer.GetNetworkPing then
+                return LocalPlayer:GetNetworkPing()
+            end
+            return nil
+        end)
+        if ok and type(res) == "number" then
+            pingSec = res
+        end
+
+        if latencyCompEnabled and pingSec and pingSec > 0 then
+            -- 使用 pingSeconds * latencyFactor 与 baseSendDelay 取最大，避免过短
+            hitFlushInterval = math.max(baseSendDelay, pingSec * latencyFactor)
+        else
+            hitFlushInterval = baseSendDelay
+        end
         SendDelaySlider.ValueLabel.Text = string.format("%.2f s", hitFlushInterval)
 
         task.wait(0.12)
@@ -1180,6 +1233,23 @@ RunService.Heartbeat:Connect(function()
             currentCooldown = val
         end
     end
+
+    -- 延迟补偿：在最终 cooldown 上加上 ping * latencyFactor（以秒为单位）
+    if latencyCompEnabled then
+        local ok, res = pcall(function()
+            if LocalPlayer and LocalPlayer.GetNetworkPing then
+                return LocalPlayer:GetNetworkPing()
+            end
+            return nil
+        end)
+        if ok and type(res) == "number" and res > 0 then
+            currentCooldown = currentCooldown + (res * latencyFactor)
+        end
+    end
+
+    -- 防止 cooldown 过低或过高
+    currentCooldown = math.clamp(currentCooldown, 0.05, 10)
+
     if now - lastAttackTime < currentCooldown then return end
     local targetsToAttack = {}
     local leftPlayers = {}
@@ -1325,6 +1395,9 @@ if SilentCooldownSlider and SilentCooldownSlider.Set then SilentCooldownSlider.S
 if AlwaysHeadSwitch and AlwaysHeadSwitch.Set then AlwaysHeadSwitch.Set(false) end
 if UseNativeSpeedSwitch and UseNativeSpeedSwitch.Set then UseNativeSpeedSwitch.Set(false) end
 if SendDelaySlider and SendDelaySlider.Set then SendDelaySlider.Set(0) end
+-- 初始化延迟补偿 UI
+if LatencyCompSwitch and LatencyCompSwitch.Set then LatencyCompSwitch.Set(false) end
+if LatencyFactorSlider and LatencyFactorSlider.Set then LatencyFactorSlider.Set(1.0) end
 
 autoAttack = AutoSwitch and AutoSwitch.Get and AutoSwitch.Get() or autoAttack
 silentAim = SilentSwitch and SilentSwitch.Get and SilentSwitch.Get() or silentAim

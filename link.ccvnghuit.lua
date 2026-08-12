@@ -1553,7 +1553,7 @@ do
         tFloat:Play()
         tTextIn.Completed:Wait()
 
-        task.wait(20)
+        task.wait(120)
 
         local tTextOut = TweenService:Create(centerText, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1, TextStrokeTransparency = 1})
         tTextOut:Play()

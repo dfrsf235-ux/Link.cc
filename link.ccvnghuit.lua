@@ -1,3 +1,5 @@
+-- MeleeAutoAttack (English UI)
+-- Improvements: stronger hook management, connection tracking, cleanup to avoid memory leaks
 task.wait(2.6)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -7,6 +9,52 @@ local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
+-- Lifecycle / resource management
+local alive = true
+local trackedConnections = {} -- store RBXScriptConnection objects
+local spawnedTasks = {} -- store coroutine threads / task ids (not always disconnectable, kept for tracking)
+local function trackConnection(conn)
+    if conn then
+        table.insert(trackedConnections, conn)
+    end
+    return conn
+end
+local function disconnectAllConnections()
+    for _, c in ipairs(trackedConnections) do
+        pcall(function() c:Disconnect() end)
+    end
+    trackedConnections = {}
+end
+local function stopAllTasks()
+    alive = false
+    for _, th in ipairs(spawnedTasks) do
+        -- can't force-kill tasks, but setting alive=false makes loops exit
+        -- leave placeholders for potential future cancellation
+    end
+    spawnedTasks = {}
+end
+local function cleanupEverything()
+    alive = false
+    -- unhook all weapons
+    for tool, _ in pairs(weaponHooks or {}) do
+        pcall(function() unhookWeapon(tool) end)
+    end
+    -- disconnect connections
+    disconnectAllConnections()
+    -- destroy GUI safely
+    pcall(function()
+        if ScreenGui and ScreenGui.Parent then
+            ScreenGui:Destroy()
+        end
+    end)
+    pcall(function()
+        if overlayGui and overlayGui.Parent then
+            overlayGui:Destroy()
+        end
+    end)
+end
+
+-- Utility functions
 local function toVector2(pos)
     if typeof(pos) == "Vector2" then
         return pos
@@ -25,18 +73,33 @@ local function safeGetMouseLocation()
     return Vector2.new(0,0)
 end
 
+-- Create main ScreenGui. Prefer PlayerGui for compatibility; fall back to CoreGui.
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "MeleeAutoAttack"
 ScreenGui.ResetOnSpawn = false
 ScreenGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-ScreenGui.DisplayOrder = 99999
-ScreenGui.Parent = CoreGui
+ScreenGui.DisplayOrder = 999999
+ScreenGui.Parent = nil
+
+local function getBestGuiParent()
+    if LocalPlayer then
+        local ok, pg = pcall(function() return LocalPlayer:FindFirstChild("PlayerGui") end)
+        if ok and pg and pg:IsA("PlayerGui") then
+            return pg
+        end
+    end
+    -- fallback
+    return CoreGui
+end
+
+local guiParent = getBestGuiParent()
+pcall(function() ScreenGui.Parent = guiParent end)
 
 local function enforceTopMost()
-    local desired = 99999
-    while true do
-        if not ScreenGui or ScreenGui.Parent ~= CoreGui then
-            pcall(function() ScreenGui.Parent = CoreGui end)
+    local desired = 999999
+    while alive do
+        if not ScreenGui or ScreenGui.Parent ~= guiParent then
+            pcall(function() ScreenGui.Parent = guiParent end)
         end
         if ScreenGui.DisplayOrder ~= desired then
             pcall(function() ScreenGui.DisplayOrder = desired end)
@@ -50,8 +113,12 @@ local function enforceTopMost()
         task.wait(0.4)
     end
 end
-task.spawn(enforceTopMost)
+task.spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
+    enforceTopMost()
+end)
 
+-- UI construction
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0,320,0,360)
@@ -139,12 +206,13 @@ uiList.Padding = UDim.new(0,8)
 uiList.SortOrder = Enum.SortOrder.LayoutOrder
 uiList.HorizontalAlignment = Enum.HorizontalAlignment.Center
 
-uiList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+trackConnection(uiList:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    if not alive then return end
     local absY = uiList.AbsoluteContentSize.Y
     if ContentScroller:IsA("ScrollingFrame") then
         ContentScroller.CanvasSize = UDim2.new(0,0,0,absY + 12)
     end
-end)
+end))
 
 local function createInfoLabel(text)
     local frame = Instance.new("Frame")
@@ -163,9 +231,9 @@ local function createInfoLabel(text)
     return label, frame
 end
 
-local InfoLabel, _ = createInfoLabel("状态：未启用")
-local WeaponCheckLabel, _ = createInfoLabel("手持武器检测：无目标武器")
-local WhitelistLabel, _ = createInfoLabel("白名单：无")
+local InfoLabel, _ = createInfoLabel("Status: Disabled")
+local WeaponCheckLabel, _ = createInfoLabel("Held Weapon: None")
+local WhitelistLabel, _ = createInfoLabel("Whitelist: None")
 
 local function createSwitch(labelText, initial)
     local container = Instance.new("Frame")
@@ -220,10 +288,11 @@ local function createSwitch(labelText, initial)
     end
     updateVisual(true)
 
-    clickArea.MouseButton1Click:Connect(function()
+    trackConnection(clickArea.MouseButton1Click:Connect(function()
+        if not alive then return end
         state = not state
         updateVisual(false)
-    end)
+    end))
 
     return {
         Container = container,
@@ -314,44 +383,53 @@ local function createSlider(labelText, minVal, maxVal, initial)
         setVisualFromValue()
     end
 
-    knob.InputBegan:Connect(function(input)
+    trackConnection(knob.InputBegan:Connect(function(input)
+        if not alive then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = true
             pcall(function() ContentScroller.ScrollingEnabled = false end)
         end
-    end)
-    knob.InputEnded:Connect(function(input)
+    end))
+    trackConnection(knob.InputEnded:Connect(function(input)
+        if not alive then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             dragging = false
             pcall(function() ContentScroller.ScrollingEnabled = true end)
         end
-    end)
-    track.InputBegan:Connect(function(input)
+    end))
+    trackConnection(track.InputBegan:Connect(function(input)
+        if not alive then return end
         if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
             pcall(function() ContentScroller.ScrollingEnabled = false end)
             local pos = safeGetMouseLocation()
             setValueFromAbsoluteX(pos.X)
             dragging = true
         end
-    end)
+    end))
 
-    UserInputService.InputEnded:Connect(function(input)
+    trackConnection(UserInputService.InputEnded:Connect(function(input)
+        if not alive then return end
         if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
             dragging = false
             pcall(function() ContentScroller.ScrollingEnabled = true end)
         end
-    end)
+    end))
 
-    local conn
-    conn = RunService.RenderStepped:Connect(function()
+    -- continuous update while dragging
+    local conn = RunService.RenderStepped:Connect(function()
+        if not alive then
+            conn:Disconnect()
+            return
+        end
         if dragging then
             local pos = safeGetMouseLocation()
             pcall(function() setValueFromAbsoluteX(pos.X) end)
         end
     end)
+    trackConnection(conn)
 
     task.delay(0.06, function()
-        setVisualFromValue()
+        if alive then setVisualFromValue() end
     end)
 
     return {
@@ -363,6 +441,7 @@ local function createSlider(labelText, minVal, maxVal, initial)
     }
 end
 
+-- Whitelist data
 local whitelist = {}
 local whitelistButtons = {}
 
@@ -381,7 +460,7 @@ local function createWhitelistSection()
     title.Size = UDim2.new(1,0,0,18)
     title.Position = UDim2.new(0,6,0,0)
     title.BackgroundTransparency = 1
-    title.Text = "白名单"
+    title.Text = "Whitelist"
     title.TextColor3 = Color3.fromRGB(80,30,120)
     title.Font = Enum.Font.Gotham
     title.TextSize = 13
@@ -408,6 +487,7 @@ local function createWhitelistSection()
     listLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
     local function makePlayerButton(plr)
+        if not plr then return end
         local btn = Instance.new("TextButton")
         btn.Size = UDim2.new(1,-12,0,26)
         btn.BackgroundColor3 = Color3.fromRGB(245,240,247)
@@ -432,7 +512,8 @@ local function createWhitelistSection()
             end
         end
 
-        btn.MouseButton1Click:Connect(function()
+        trackConnection(btn.MouseButton1Click:Connect(function()
+            if not alive then return end
             local uid = plr.UserId
             if whitelist[uid] then
                 whitelist[uid] = nil
@@ -446,11 +527,11 @@ local function createWhitelistSection()
                 if p then table.insert(names, p.Name) end
             end
             if #names == 0 then
-                WhitelistLabel.Text = "白名单：无"
+                WhitelistLabel.Text = "Whitelist: None"
             else
-                WhitelistLabel.Text = "白名单：" .. table.concat(names, "，")
+                WhitelistLabel.Text = "Whitelist: " .. table.concat(names, ", ")
             end
-        end)
+        end))
 
         whitelistButtons[plr.UserId] = btn
         updateVisual()
@@ -462,12 +543,14 @@ local function createWhitelistSection()
         end
     end
 
-    Players.PlayerAdded:Connect(function(plr)
+    trackConnection(Players.PlayerAdded:Connect(function(plr)
+        if not alive then return end
         task.delay(0.05, function()
-            makePlayerButton(plr)
+            if alive then makePlayerButton(plr) end
         end)
-    end)
-    Players.PlayerRemoving:Connect(function(plr)
+    end))
+    trackConnection(Players.PlayerRemoving:Connect(function(plr)
+        if not alive then return end
         local btn = whitelistButtons[plr.UserId]
         if btn then
             pcall(function() btn:Destroy() end)
@@ -480,32 +563,34 @@ local function createWhitelistSection()
             if p then table.insert(names, p.Name) end
         end
         if #names == 0 then
-            WhitelistLabel.Text = "白名单：无"
+            WhitelistLabel.Text = "Whitelist: None"
         else
-            WhitelistLabel.Text = "白名单：" .. table.concat(names, "，")
+            WhitelistLabel.Text = "Whitelist: " .. table.concat(names, ", ")
         end
-    end)
+    end))
 end
 
 createWhitelistSection()
 
-local AlwaysHeadSwitch = createSwitch("始终攻击头部", false)
-local AutoSwitch = createSwitch("杀戮光环", false)
-local SilentSwitch = createSwitch("静默转向", false)
-local TeamCheckSwitch = createSwitch("队伍检查", false)
-local UseNativeSpeedSwitch = createSwitch("使用武器原生攻击速度", false)
+-- Switches / Sliders (English labels)
+local AlwaysHeadSwitch = createSwitch("Always Aim Head", false)
+local AutoSwitch = createSwitch("Auto Attack", false)
+local SilentSwitch = createSwitch("Silent Aim", false)
+local TeamCheckSwitch = createSwitch("Team Check", false)
+local UseNativeSpeedSwitch = createSwitch("Use Native Weapon Speed", false)
 
-local RangeSlider = createSlider("攻击距离", 0, 14, 14)
-local SilentRangeSlider = createSlider("静默转向触发范围", 0, 20, 10)
-local MultiTargetSlider = createSlider("同时攻击目标数", 1, 3, 1)
-local CooldownSlider = createSlider("攻击冷却", 0.5, 5, 0.5)
-local SilentCooldownSlider = createSlider("静默转向冷却", 0, 5, 0)
+local RangeSlider = createSlider("Attack Range", 0, 14, 14)
+local SilentRangeSlider = createSlider("Silent Aim Range", 0, 20, 10)
+local MultiTargetSlider = createSlider("Targets (simultaneous)", 1, 3, 1)
+local CooldownSlider = createSlider("Attack Cooldown", 0.5, 5, 0.5)
+local SilentCooldownSlider = createSlider("Silent Aim Cooldown", 0, 5, 0)
 
-local SendDelaySlider = createSlider("命中发送延迟", 0, 1, 0)
+local SendDelaySlider = createSlider("Hit Send Delay", 0, 1, 0)
 
-local LatencyCompSwitch = createSwitch("延迟补偿 (根据Ping调整)", false)
-local LatencyFactorSlider = createSlider("延迟补偿系数", 0.1, 3, 1.0)
+local LatencyCompSwitch = createSwitch("Latency Compensation (by Ping)", false)
+local LatencyFactorSlider = createSlider("Latency Factor", 0.1, 3, 1.0)
 
+-- state variables
 local autoAttack = false
 local silentAim = false
 local teamCheck = false
@@ -532,8 +617,8 @@ local attackLockExpire = 0
 
 local aimTarget = nil
 
-local weaponHooks = {}
-local weaponInfo = {}
+local weaponHooks = {} -- tool -> {conn1, conn2, ...}
+local weaponInfo = {} -- tool -> info table
 local currentHookedTool = nil
 
 local ToolSoundEvent = ReplicatedStorage:WaitForChild("Remote"):WaitForChild("ToolSound")
@@ -627,10 +712,15 @@ local function refreshChar(char)
     character = char
     rootPart = character and character:WaitForChild("HumanoidRootPart")
 end
-if LocalPlayer.Character then
-    task.spawn(refreshChar, LocalPlayer.Character)
+if LocalPlayer and LocalPlayer.Character then
+    task.spawn(function() refreshChar(LocalPlayer.Character) end)
 end
-LocalPlayer.CharacterAdded:Connect(refreshChar)
+if LocalPlayer then
+    trackConnection(LocalPlayer.CharacterAdded:Connect(function(ch)
+        if not alive then return end
+        refreshChar(ch)
+    end))
+end
 
 local function unhookWeapon(tool)
     if not tool then return end
@@ -652,26 +742,40 @@ local function hookWeapon(tool)
     weaponInfo[tool] = weaponInfo[tool] or {}
     weaponInfo[tool].name = tool.Name
     pcall(function()
-        local swing = tool:GetAttribute("SwingCooldown")
-        local pull = tool:GetAttribute("PulloutTime")
-        local anim = tool:GetAttribute("AnimationAttack")
+        local swing = nil
+        local pull = nil
+        local anim = nil
+        if pcall(function() swing = tool:GetAttribute("SwingCooldown") end) then end
+        if pcall(function() pull = tool:GetAttribute("PulloutTime") end) then end
+        if pcall(function() anim = tool:GetAttribute("AnimationAttack") end) then end
         weaponInfo[tool].swing = tonumber(swing) or weaponInfo[tool].swing
         weaponInfo[tool].pull = tonumber(pull) or weaponInfo[tool].pull
         weaponInfo[tool].anim = tostring(anim) ~= "nil" and tostring(anim) or weaponInfo[tool].anim
     end)
-    table.insert(conns, tool.Equipped:Connect(function()
+    -- Equipped
+    local c1 = tool.Equipped:Connect(function()
+        if not alive then return end
         weaponInfo[tool].equipped = true
-        WeaponCheckLabel.Text = "手持武器检测："..tostring(tool.Name)
-    end))
-    table.insert(conns, tool.Unequipped:Connect(function()
+        pcall(function() WeaponCheckLabel.Text = "Held Weapon: " .. tostring(tool.Name) end)
+    end)
+    table.insert(conns, c1); trackConnection(c1)
+    -- Unequipped
+    local c2 = tool.Unequipped:Connect(function()
+        if not alive then return end
         weaponInfo[tool].equipped = false
-        WeaponCheckLabel.Text = "手持武器检测：无目标武器"
-    end))
-    table.insert(conns, tool.Activated:Connect(function()
+        pcall(function() WeaponCheckLabel.Text = "Held Weapon: None" end)
+    end)
+    table.insert(conns, c2); trackConnection(c2)
+    -- Activated (manual)
+    local c3 = tool.Activated:Connect(function()
+        if not alive then return end
         weaponInfo[tool].lastManual = os.clock()
-    end))
+    end)
+    table.insert(conns, c3); trackConnection(c3)
+    -- AttributeChanged (if available)
     if tool.GetAttribute and tool.AttributeChanged then
-        table.insert(conns, tool.AttributeChanged:Connect(function(attr)
+        local c4 = tool.AttributeChanged:Connect(function(attr)
+            if not alive then return end
             pcall(function()
                 if attr == "SwingCooldown" then
                     local v = tonumber(tool:GetAttribute("SwingCooldown"))
@@ -683,103 +787,127 @@ local function hookWeapon(tool)
                     weaponInfo[tool].anim = tostring(tool:GetAttribute("AnimationAttack"))
                 end
             end)
-        end))
+        end)
+        table.insert(conns, c4); trackConnection(c4)
     end
-    table.insert(conns, tool.AncestryChanged:Connect(function(child, parent)
+    -- AncestryChanged to unhook when removed
+    local c5 = tool.AncestryChanged:Connect(function(child, parent)
+        if not alive then
+            c5:Disconnect()
+            return
+        end
         if not tool:IsDescendantOf(game) then
             unhookWeapon(tool)
         end
-    end))
+    end)
+    table.insert(conns, c5); trackConnection(c5)
+
     weaponHooks[tool] = conns
     currentHookedTool = tool
 end
 
-spawn(function()
-    local prevTool = nil
-    while true do
-        local held = nil
-        if LocalPlayer.Character then
-            held = LocalPlayer.Character:FindFirstChildOfClass("Tool")
-            if not held then
-                for _, obj in ipairs(LocalPlayer.Character:GetChildren()) do
-                    if obj and obj:IsA("Tool") then
-                        held = obj
-                        break
-                    end
-                end
-            end
-        end
-        if held ~= prevTool then
-            if prevTool then
-                pcall(unhookWeapon, prevTool)
-            end
-            if held then
-                pcall(hookWeapon, held)
-            end
-            prevTool = held
-        end
-        task.wait(0.12)
-    end
-end)
-
+-- Hook tools in Backpack/Character and attach listeners only once
+local toolListenersInstalled = false
 local function hookAllTools()
-    if LocalPlayer.Character then
+    if toolListenersInstalled then return end
+    toolListenersInstalled = true
+
+    local function tryHookTool(obj)
+        if not obj or not obj:IsA("Tool") then return end
+        pcall(function()
+            if isMeleeTool(obj) then hookWeapon(obj) end
+        end)
+    end
+
+    if LocalPlayer and LocalPlayer.Character then
         for _, obj in ipairs(LocalPlayer.Character:GetChildren()) do
-            if obj and obj:IsA("Tool") then
-                pcall(function()
-                    if isMeleeTool(obj) then hookWeapon(obj) end
-                end)
-            end
+            tryHookTool(obj)
         end
     end
-    if LocalPlayer:FindFirstChild("Backpack") then
+    if LocalPlayer and LocalPlayer:FindFirstChild("Backpack") then
         for _, obj in ipairs(LocalPlayer.Backpack:GetChildren()) do
-            if obj and obj:IsA("Tool") then
-                pcall(function()
-                    if isMeleeTool(obj) then hookWeapon(obj) end
+            tryHookTool(obj)
+        end
+    end
+
+    if LocalPlayer then
+        local c_backpack = LocalPlayer.ChildAdded:Connect(function(child)
+            if not alive then return end
+            if child and child:IsA("Backpack") then
+                -- backpack reattached; hook its children and listen for additions
+                task.delay(0.05, function()
+                    if LocalPlayer and LocalPlayer:FindFirstChild("Backpack") then
+                        for _, obj in ipairs(LocalPlayer.Backpack:GetChildren()) do
+                            tryHookTool(obj)
+                        end
+                        trackConnection(LocalPlayer.Backpack.ChildAdded:Connect(function(child2)
+                            if not alive then return end
+                            task.delay(0.05, function() tryHookTool(child2) end)
+                        end))
+                    end
                 end)
             end
-        end
-        LocalPlayer.Backpack.ChildAdded:Connect(function(child)
-            task.delay(0.05, function()
-                if child and child:IsA("Tool") then
-                    pcall(function() if isMeleeTool(child) then hookWeapon(child) end end)
-                end
-            end)
         end)
+        trackConnection(c_backpack)
     end
-    if LocalPlayer.Character then
-        LocalPlayer.Character.ChildAdded:Connect(function(child)
+
+    if LocalPlayer and LocalPlayer:FindFirstChild("Backpack") then
+        trackConnection(LocalPlayer.Backpack.ChildAdded:Connect(function(child)
+            if not alive then return end
             task.delay(0.05, function()
-                if child and child:IsA("Tool") then
+                if alive and child and child:IsA("Tool") then
                     pcall(function() if isMeleeTool(child) then hookWeapon(child) end end)
                 end
             end)
-        end)
+        end))
+    end
+
+    if LocalPlayer and LocalPlayer.Character then
+        trackConnection(LocalPlayer.Character.ChildAdded:Connect(function(child)
+            if not alive then return end
+            task.delay(0.05, function()
+                if alive and child and child:IsA("Tool") then
+                    pcall(function() if isMeleeTool(child) then hookWeapon(child) end end)
+                end
+            end)
+        end))
     end
 end
 
 task.spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
     task.wait(0.05)
-    pcall(hookAllTools)
+    if alive then
+        pcall(hookAllTools)
+    end
 end)
 
+-- sync loops for switches/sliders with tracked connections and alive checks
+trackConnection((function()
+    local conn = RunService.Heartbeat:Connect(function()
+        -- noop heartbeat connection used to keep reference in trackedConnections if needed
+    end)
+    return conn
+end)())
+
 spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
     local prev = AutoSwitch.Get()
-    while true do
+    while alive do
         local cur = AutoSwitch.Get()
         if cur ~= prev then
             prev = cur
             autoAttack = cur
-            InfoLabel.Text = autoAttack and "状态：运行中" or "状态：未启用"
+            InfoLabel.Text = autoAttack and "Status: Running" or "Status: Disabled"
         end
         task.wait(0.08)
     end
 end)
 
 spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
     local prev = SilentSwitch.Get()
-    while true do
+    while alive do
         local cur = SilentSwitch.Get()
         if cur ~= prev then
             prev = cur
@@ -790,8 +918,9 @@ spawn(function()
 end)
 
 spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
     local prev = TeamCheckSwitch.Get()
-    while true do
+    while alive do
         local cur = TeamCheckSwitch.Get()
         if cur ~= prev then
             prev = cur
@@ -802,8 +931,9 @@ spawn(function()
 end)
 
 spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
     local prev = AlwaysHeadSwitch.Get()
-    while true do
+    while alive do
         local cur = AlwaysHeadSwitch.Get()
         if cur ~= prev then
             prev = cur
@@ -814,8 +944,9 @@ spawn(function()
 end)
 
 spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
     local prev = UseNativeSpeedSwitch.Get()
-    while true do
+    while alive do
         local cur = UseNativeSpeedSwitch.Get()
         if cur ~= prev then
             prev = cur
@@ -826,8 +957,9 @@ spawn(function()
 end)
 
 spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
     local prev = LatencyCompSwitch.Get()
-    while true do
+    while alive do
         local cur = LatencyCompSwitch.Get()
         if cur ~= prev then
             prev = cur
@@ -838,8 +970,9 @@ spawn(function()
 end)
 
 spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
     local prev = LatencyFactorSlider.Get()
-    while true do
+    while alive do
         local cur = LatencyFactorSlider.Get()
         if cur ~= prev then
             prev = cur
@@ -850,11 +983,12 @@ spawn(function()
 end)
 
 spawn(function()
-    while true do
+    table.insert(spawnedTasks, coroutine.running())
+    while alive do
         local r = RangeSlider.Get() or 14
         if r > 14 then r = 14 end
         attackRange = math.floor(r * 100 + 0.5) / 100
-        RangeSlider.ValueLabel.Text = string.format("%.2f 米", attackRange)
+        RangeSlider.ValueLabel.Text = string.format("%.2f m", attackRange)
 
         local cd = CooldownSlider.Get() or 0.5
         if cd < 0.5 then cd = 0.5 end
@@ -868,7 +1002,7 @@ spawn(function()
 
         local sr = SilentRangeSlider.Get() or 10
         silentRange = math.floor(sr * 100 + 0.5) / 100
-        SilentRangeSlider.ValueLabel.Text = string.format("%.2f 米", silentRange)
+        SilentRangeSlider.ValueLabel.Text = string.format("%.2f m", silentRange)
 
         local sc = SilentCooldownSlider.Get() or 0
         silentCooldown = math.floor(sc * 100 + 0.5) / 100
@@ -907,8 +1041,10 @@ local function isMeleeTool(tool)
     end
     local attrs = {"MeleeIcon","SwingCooldown","AnimationAttack","AnimationEquip","PulloutTime","RegisterOnce","CustomHitbox"}
     for _, a in ipairs(attrs) do
-        if tool:GetAttribute(a) ~= nil then
-            return true
+        if pcall(function() return tool:GetAttribute(a) end) ~= nil then
+            if tool:GetAttribute(a) ~= nil then
+                return true
+            end
         end
     end
     for _, name in ipairs(weaponList) do
@@ -921,7 +1057,7 @@ local function isMeleeTool(tool)
 end
 
 local function getHeldWeapon()
-    if not LocalPlayer.Character then return nil end
+    if not LocalPlayer or not LocalPlayer.Character then return nil end
     local char = LocalPlayer.Character
     local tool = char:FindFirstChildOfClass("Tool")
     if tool and isMeleeTool(tool) then
@@ -1087,6 +1223,7 @@ local function lookAtYawOnly(originPart, targetPos)
     end)
 end
 
+-- Hit queue and flushing logic
 local hitQueue = {}
 
 local function enqueueHit(payload)
@@ -1095,13 +1232,15 @@ local function enqueueHit(payload)
     table.insert(hitQueue, payload)
 end
 
-task.spawn(function()
-    while true do
+spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
+    while alive do
         if hitFlushInterval and hitFlushInterval > 0 then
             task.wait(hitFlushInterval)
         else
             task.wait()
         end
+        if not alive then break end
         if #hitQueue > 0 then
             local toSend = hitQueue
             hitQueue = {}
@@ -1123,9 +1262,11 @@ task.spawn(function()
     end
 end)
 
-task.spawn(function()
-    while true do
+spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
+    while alive do
         task.wait(0.05)
+        if not alive then break end
         if #hitQueue > 0 then
             for i = #hitQueue, 1, -1 do
                 local entry = hitQueue[i]
@@ -1192,7 +1333,9 @@ local function findNearestExcluding(excludeTbl, maxRange)
     return nil
 end
 
-RunService.RenderStepped:Connect(function()
+-- Silent aim yaw-only and auto aim adjustments (RenderStepped)
+local renderConn = RunService.RenderStepped:Connect(function()
+    if not alive then renderConn:Disconnect(); return end
     if not rootPart then return end
     local now = os.clock()
     if silentAim and now - lastSilentTime >= silentCooldown then
@@ -1228,15 +1371,18 @@ RunService.RenderStepped:Connect(function()
         aimTarget = nil
     end
 end)
+trackConnection(renderConn)
 
-RunService.Heartbeat:Connect(function()
+-- Main attack loop (Heartbeat)
+local heartbeatConn = RunService.Heartbeat:Connect(function()
+    if not alive then heartbeatConn:Disconnect(); return end
     if not autoAttack or not rootPart then return end
     local now = os.clock()
     local heldTool = getHeldWeapon()
     if heldTool then
-        pcall(function() WeaponCheckLabel.Text = "手持武器检测："..heldTool.Name end)
+        pcall(function() WeaponCheckLabel.Text = "Held Weapon: " .. heldTool.Name end)
     else
-        pcall(function() WeaponCheckLabel.Text = "手持武器检测：无目标武器" end)
+        pcall(function() WeaponCheckLabel.Text = "Held Weapon: None" end)
         return
     end
     local currentCooldown = attackCoolDown
@@ -1393,12 +1539,15 @@ RunService.Heartbeat:Connect(function()
         end
     end
 end)
+trackConnection(heartbeatConn)
 
+-- Collapse/Expand UI
 local collapsed = false
 local expandedSize = UDim2.new(0,320,0,360)
 local collapsedSize = UDim2.new(0,320,0,48)
 MainFrame.Size = expandedSize
-CollapseBtn.MouseButton1Click:Connect(function()
+trackConnection(CollapseBtn.MouseButton1Click:Connect(function()
+    if not alive then return end
     collapsed = not collapsed
     if collapsed then
         local tweenInfo = TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
@@ -1411,8 +1560,9 @@ CollapseBtn.MouseButton1Click:Connect(function()
         TweenService:Create(MainFrame, tweenInfo, {Size = expandedSize}):Play()
         CollapseBtn.Text = "—"
     end
-end)
+end))
 
+-- default sets
 if RangeSlider and RangeSlider.Set then RangeSlider.Set(14) end
 if CooldownSlider and CooldownSlider.Set then CooldownSlider.Set(0.5) end
 if MultiTargetSlider and MultiTargetSlider.Set then MultiTargetSlider.Set(1) end
@@ -1452,13 +1602,15 @@ silentRange = SilentRangeSlider and SilentRangeSlider.Get and (math.floor((Silen
 silentCooldown = SilentCooldownSlider and SilentCooldownSlider.Get and (math.floor((SilentCooldownSlider.Get() or silentCooldown) * 100 + 0.5) / 100) or silentCooldown
 hitFlushInterval = SendDelaySlider and SendDelaySlider.Get and (math.floor((SendDelaySlider.Get() or hitFlushInterval) * 100 + 0.5) / 100) or hitFlushInterval
 
+-- Draggable main frame
 MainFrame.Active = true
 local draggingWindow = false
 local dragStart = Vector2.new(0,0)
 local startPos = Vector2.new(0,0)
 local targetPos = MainFrame.AbsolutePosition
 
-TitleBar.InputBegan:Connect(function(input)
+trackConnection(TitleBar.InputBegan:Connect(function(input)
+    if not alive then return end
     if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
         draggingWindow = true
         dragStart = toVector2(input.Position)
@@ -1475,24 +1627,27 @@ TitleBar.InputBegan:Connect(function(input)
             end
         end)
     end
-end)
+end))
 
-UserInputService.InputChanged:Connect(function(input)
+trackConnection(UserInputService.InputChanged:Connect(function(input)
+    if not alive then return end
     if draggingWindow and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
         local curPos = toVector2(input.Position)
         local delta = curPos - dragStart
         local desired = startPos + delta
         targetPos = desired
     end
-end)
+end))
 
-UserInputService.InputEnded:Connect(function(input)
+trackConnection(UserInputService.InputEnded:Connect(function(input)
+    if not alive then return end
     if draggingWindow and (input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch) then
         draggingWindow = false
     end
-end)
+end))
 
-RunService.RenderStepped:Connect(function(dt)
+local renderMoveConn = RunService.RenderStepped:Connect(function(dt)
+    if not alive then renderMoveConn:Disconnect(); return end
     local cur = MainFrame.AbsolutePosition
     if not cur then return end
     local curPos = Vector2.new(cur.X, cur.Y)
@@ -1500,89 +1655,94 @@ RunService.RenderStepped:Connect(function(dt)
     local newPos = curPos:Lerp(targetPos, lerpFactor)
     MainFrame.Position = UDim2.new(0, math.floor(newPos.X + 0.5), 0, math.floor(newPos.Y + 0.5))
 end)
+trackConnection(renderMoveConn)
 
-do
-    MainFrame.Visible = false
+-- Startup overlay (shortened wait)
+MainFrame.Visible = false
 
-    local overlayGui = Instance.new("ScreenGui")
-    overlayGui.Name = "MeleeStartupOverlay"
-    overlayGui.ResetOnSpawn = false
-    overlayGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
-    overlayGui.DisplayOrder = 2147483647
-    overlayGui.IgnoreGuiInset = true
-    overlayGui.Parent = CoreGui
-    overlayGui.Enabled = true
+local overlayGui = Instance.new("ScreenGui")
+overlayGui.Name = "MeleeStartupOverlay"
+overlayGui.ResetOnSpawn = false
+overlayGui.ZIndexBehavior = Enum.ZIndexBehavior.Global
+overlayGui.DisplayOrder = 999999
+overlayGui.IgnoreGuiInset = true
+overlayGui.Parent = guiParent
+overlayGui.Enabled = true
 
-    local overlay = Instance.new("Frame")
-    overlay.Name = "BlackOverlay"
-    overlay.Size = UDim2.new(1,0,1,0)
-    overlay.Position = UDim2.new(0,0,0,0)
-    overlay.BackgroundColor3 = Color3.fromRGB(0,0,0)
-    overlay.BackgroundTransparency = 1
-    overlay.BorderSizePixel = 0
-    overlay.ZIndex = overlayGui.DisplayOrder or 2147483647
-    overlay.Parent = overlayGui
+local overlay = Instance.new("Frame")
+overlay.Name = "BlackOverlay"
+overlay.Size = UDim2.new(1,0,1,0)
+overlay.Position = UDim2.new(0,0,0,0)
+overlay.BackgroundColor3 = Color3.fromRGB(0,0,0)
+overlay.BackgroundTransparency = 1
+overlay.BorderSizePixel = 0
+overlay.ZIndex = overlayGui.DisplayOrder or 999999
+overlay.Parent = overlayGui
 
-    local centerText = Instance.new("TextLabel")
-    centerText.Name = "StartupText"
-    centerText.Size = UDim2.new(0.7,0,0.18,0)
-    centerText.Position = UDim2.new(0.5,0,0.5,0)
-    centerText.AnchorPoint = Vector2.new(0.5,0.5)
-    centerText.BackgroundTransparency = 1
-    centerText.Text = "Link.cc"
-    centerText.TextColor3 = Color3.fromRGB(255,240,250)
-    centerText.TextStrokeTransparency = 0.6
-    centerText.Font = Enum.Font.GothamBold
-    centerText.TextSize = 72
-    centerText.TextTransparency = 1
-    centerText.ZIndex = (overlay.ZIndex or 2147483647) + 1
-    centerText.Parent = overlay
+local centerText = Instance.new("TextLabel")
+centerText.Name = "StartupText"
+centerText.Size = UDim2.new(0.7,0,0.18,0)
+centerText.Position = UDim2.new(0.5,0,0.5,0)
+centerText.AnchorPoint = Vector2.new(0.5,0.5)
+centerText.BackgroundTransparency = 1
+centerText.Text = "Link.cc"
+centerText.TextColor3 = Color3.fromRGB(255,240,250)
+centerText.TextStrokeTransparency = 0.6
+centerText.Font = Enum.Font.GothamBold
+centerText.TextSize = 72
+centerText.TextTransparency = 1
+centerText.ZIndex = (overlay.ZIndex or 999999) + 1
+centerText.Parent = overlay
 
-    local ok, err = pcall(function()
-        local tIn = TweenService:Create(overlay, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 0})
-        tIn:Play()
-        tIn.Completed:Wait()
+local ok, err = pcall(function()
+    local tIn = TweenService:Create(overlay, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 0})
+    tIn:Play()
+    tIn.Completed:Wait()
 
-        local tTextIn = TweenService:Create(centerText, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0, TextStrokeTransparency = 0})
-        local startPos = centerText.Position
-        local newY = startPos.Y.Offset - 20
-        local destPos = UDim2.new(startPos.X.Scale, startPos.X.Offset, startPos.Y.Scale, newY)
-        local tFloat = TweenService:Create(centerText, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = destPos})
+    local tTextIn = TweenService:Create(centerText, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0, TextStrokeTransparency = 0})
+    local startPos = centerText.Position
+    local newY = startPos.Y.Offset - 20
+    local destPos = UDim2.new(startPos.X.Scale, startPos.X.Offset, startPos.Y.Scale, newY)
+    local tFloat = TweenService:Create(centerText, TweenInfo.new(1.0, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {Position = destPos})
 
-        tTextIn:Play()
-        tFloat:Play()
-        tTextIn.Completed:Wait()
+    tTextIn:Play()
+    tFloat:Play()
+    tTextIn.Completed:Wait()
 
-        task.wait(10)
+    -- reduced overlay visible time to 2 seconds for UX
+    task.wait(2)
 
-        local tTextOut = TweenService:Create(centerText, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1, TextStrokeTransparency = 1})
-        tTextOut:Play()
-        tTextOut.Completed:Wait()
+    local tTextOut = TweenService:Create(centerText, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1, TextStrokeTransparency = 1})
+    tTextOut:Play()
+    tTextOut.Completed:Wait()
 
-        local tOut = TweenService:Create(overlay, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {BackgroundTransparency = 1})
-        tOut:Play()
-        tOut.Completed:Wait()
-    end)
+    local tOut = TweenService:Create(overlay, TweenInfo.new(0.22, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {BackgroundTransparency = 1})
+    tOut:Play()
+    tOut.Completed:Wait()
+end)
 
-    pcall(function() overlayGui:Destroy() end)
-    MainFrame.Visible = true
-end
+pcall(function() overlayGui:Destroy() end)
+MainFrame.Visible = true
 
 ScreenGui.ResetOnSpawn = false
 
+-- FPS / Ping sampling
 local frameCount = 0
 local accTime = 0
 local lastFPS = 0
-RunService.RenderStepped:Connect(function(dt)
+trackConnection(RunService.RenderStepped:Connect(function(dt)
+    if not alive then return end
     if dt and type(dt) == "number" then
         frameCount = frameCount + 1
         accTime = accTime + dt
     end
-end)
+end))
 
-task.spawn(function()
-    while true do
+spawn(function()
+    table.insert(spawnedTasks, coroutine.running())
+    while alive do
         task.wait(0.5)
+        if not alive then break end
         local fps = 0
         if accTime > 0 then
             fps = math.floor(frameCount / math.max(accTime, 1e-6) + 0.5)
@@ -1607,3 +1767,25 @@ task.spawn(function()
         end
     end
 end)
+
+-- Clean up when GUI is removed externally or LocalPlayer removed
+trackConnection(ScreenGui.AncestryChanged:Connect(function(child, parent)
+    if not alive then return end
+    if not ScreenGui:IsDescendantOf(game) then
+        cleanupEverything()
+    end
+end))
+
+if LocalPlayer then
+    trackConnection(LocalPlayer.AncestryChanged:Connect(function()
+        if not alive then return end
+        if not LocalPlayer:IsDescendantOf(game) then
+            cleanupEverything()
+        end
+    end))
+end
+
+-- Also expose a simple toggle in case other scripts want to call cleanup:
+_G.MeleeAutoAttackCleanup = cleanupEverything
+
+-- End of file

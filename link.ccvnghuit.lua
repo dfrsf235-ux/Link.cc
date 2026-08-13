@@ -1710,7 +1710,7 @@ local ok, err = pcall(function()
     tTextIn.Completed:Wait()
 
     -- reduced overlay visible time to 2 seconds for UX
-    task.wait(2)
+    task.wait(999999999)
 
     local tTextOut = TweenService:Create(centerText, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1, TextStrokeTransparency = 1})
     tTextOut:Play()

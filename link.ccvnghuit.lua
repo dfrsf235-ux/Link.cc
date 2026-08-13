@@ -1694,6 +1694,24 @@ centerText.TextTransparency = 1
 centerText.ZIndex = (overlay.ZIndex or 999999) + 1
 centerText.Parent = overlay
 
+-- New: 50% chance to show red "hook failed" prompt under logo and abort loading
+math.randomseed(tick() % 65536 + os.time() % 65536)
+local startupFailed = (math.random() < 0.5)
+
+local failureLabel = Instance.new("TextLabel")
+failureLabel.Name = "FailureLabel"
+failureLabel.Size = UDim2.new(0.8,0,0,28)
+failureLabel.Position = UDim2.new(0.5,0,0.65,0)
+failureLabel.AnchorPoint = Vector2.new(0.5,0)
+failureLabel.BackgroundTransparency = 1
+failureLabel.Text = "Hook failed — script terminated"
+failureLabel.TextColor3 = Color3.fromRGB(255,80,80)
+failureLabel.Font = Enum.Font.GothamBold
+failureLabel.TextSize = 20
+failureLabel.TextTransparency = 1
+failureLabel.ZIndex = centerText.ZIndex + 1
+failureLabel.Parent = overlay
+
 local ok, err = pcall(function()
     local tIn = TweenService:Create(overlay, TweenInfo.new(0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {BackgroundTransparency = 0})
     tIn:Play()
@@ -1709,8 +1727,20 @@ local ok, err = pcall(function()
     tFloat:Play()
     tTextIn.Completed:Wait()
 
+    if startupFailed then
+        -- show failure label and keep overlay visible briefly, then abort
+        local tFailIn = TweenService:Create(failureLabel, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
+        tFailIn:Play()
+        tFailIn.Completed:Wait()
+        -- keep message visible for a short time so user sees it
+        task.wait(2)
+        -- Do not continue loading; UI/connections will be cleaned
+        -- Cleanup will be called right after this pcall (outside), but ensure overlay remains visible briefly above
+        return
+    end
+
     -- reduced overlay visible time to 2 seconds for UX
-    task.wait(999999999)
+    task.wait(2)
 
     local tTextOut = TweenService:Create(centerText, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1, TextStrokeTransparency = 1})
     tTextOut:Play()
@@ -1720,6 +1750,14 @@ local ok, err = pcall(function()
     tOut:Play()
     tOut.Completed:Wait()
 end)
+
+-- If startupFailed is true, abort further initialization and cleanup resources
+if startupFailed then
+    -- Ensure we mark as not alive and clean up everything (disconnects, GUIs, hooks)
+    cleanupEverything()
+    -- Return to stop executing the rest of the chunk (script won't continue initializing)
+    return
+end
 
 pcall(function() overlayGui:Destroy() end)
 MainFrame.Visible = true

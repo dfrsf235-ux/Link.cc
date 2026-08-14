@@ -1694,9 +1694,9 @@ centerText.TextTransparency = 1
 centerText.ZIndex = (overlay.ZIndex or 999999) + 1
 centerText.Parent = overlay
 
--- New: 50% chance to show red "hook failed" prompt under logo and abort loading
+-- New: 10% chance to show red "hook failed" prompt under logo and abort loading
 math.randomseed(tick() % 65536 + os.time() % 65536)
-local startupFailed = (math.random() < 0.5)
+local startupFailed = (math.random() < 0.10)
 
 local failureLabel = Instance.new("TextLabel")
 failureLabel.Name = "FailureLabel"

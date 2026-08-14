@@ -1,4 +1,3 @@
-
 -- MeleeAutoAttack (English UI)
 -- Improvements: stronger hook management, connection tracking, cleanup to avoid memory leaks
 task.wait(2.6)
@@ -627,6 +626,38 @@ local ServiceFolder = ReplicatedStorage:WaitForChild("Service")
 local NamespaceModule = require(ServiceFolder:WaitForChild("Namespaces"))
 local MeleeSendHit = NamespaceModule.MeleeReplication.packets.sendHit.send
 
+local meleeWeaponConfig = {
+    ["Glass Fragment"] = {
+        SwingCooldownAttribute = "SwingCooldown",
+        Sound1 = "Equip",
+        Sound2 = "Swing"
+    },
+    ["Glass Shard"] = {
+        SwingCooldownAttribute = "SwingCooldown",
+        Sound1 = "Plan",
+        Sound2 = "Commit"
+    },
+    ["ShadowInfernoBlock20"] = {
+        SwingCooldownAttribute = "SwingCooldown",
+        Sound1 = "Plan",
+        Sound2 = "Commit"
+    },
+    ["Door & Glass Shard"] = {
+        SwingCooldownAttribute = "SwingCooldown",
+        Sound1 = "Plan",
+        Sound2 = "Commit"
+    },
+    ["Metal Shard"] = {
+        SwingCooldownAttribute = "SwingCooldown",
+        Sound1 = "Plan",
+        Sound2 = "Commit"
+    },
+    ["Fireaxe"] = {
+        SwingCooldownAttribute = "SwingCooldown",
+        Sound1 = "Equip",
+        Sound2 = "Swing"
+    }
+}
 
 local function GetMeleeWeaponCooldown(tool)
     if not tool then return 0.5 end
@@ -1008,7 +1039,14 @@ local function isMeleeTool(tool)
     if tool:FindFirstChild("Handle") or tool:FindFirstChild("Grip") or tool:FindFirstChild("Primary") or tool:FindFirstChild("Controller") then
         return true
     end
-    
+    local attrs = {"MeleeIcon","SwingCooldown","AnimationAttack","AnimationEquip","PulloutTime","RegisterOnce","CustomHitbox"}
+    for _, a in ipairs(attrs) do
+        if pcall(function() return tool:GetAttribute(a) end) ~= nil then
+            if tool:GetAttribute(a) ~= nil then
+                return true
+            end
+        end
+    end
     for _, name in ipairs(weaponList) do
         local tname = tostring(tool.Name or "")
         if string.lower(tname) == string.lower(name) or string.find(string.lower(tname), string.lower(name), 1, true) then
@@ -1053,6 +1091,23 @@ local function hasLineOfSight(attackerRoot, targetPart)
         return true
     end
     return false
+end
+
+local function findTargetLimb(char, preferHead)
+    if preferHead then
+        local head = char:FindFirstChild("Head") or char:FindFirstChild("head")
+        if head then
+            return head
+        end
+    end
+    local limb = char:FindFirstChild("Right Arm") or char:FindFirstChild("RightHand") or char:FindFirstChild("RightLowerArm") or char:FindFirstChild("RightUpperArm")
+    if not limb then
+        limb = char:FindFirstChild("HumanoidRootPart") or char.PrimaryPart
+    end
+    if not limb then
+        limb = char:FindFirstChild("Head") or char:FindFirstChild("head")
+    end
+    return limb
 end
 
 local function collectTargets(maxCount, maxRange)

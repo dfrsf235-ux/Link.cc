@@ -1,5 +1,3 @@
--- MeleeAutoAttack (English UI)
--- Improvements: stronger hook management, connection tracking, cleanup to avoid memory leaks
 task.wait(2.6)
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -9,10 +7,9 @@ local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local LocalPlayer = Players.LocalPlayer
 
--- Lifecycle / resource management
 local alive = true
-local trackedConnections = {} -- store RBXScriptConnection objects
-local spawnedTasks = {} -- store coroutine threads / task ids (not always disconnectable, kept for tracking)
+local trackedConnections = {}
+local spawnedTasks = {}
 local function trackConnection(conn)
     if conn then
         table.insert(trackedConnections, conn)
@@ -28,20 +25,15 @@ end
 local function stopAllTasks()
     alive = false
     for _, th in ipairs(spawnedTasks) do
-        -- can't force-kill tasks, but setting alive=false makes loops exit
-        -- leave placeholders for potential future cancellation
     end
     spawnedTasks = {}
 end
 local function cleanupEverything()
     alive = false
-    -- unhook all weapons
     for tool, _ in pairs(weaponHooks or {}) do
         pcall(function() unhookWeapon(tool) end)
     end
-    -- disconnect connections
     disconnectAllConnections()
-    -- destroy GUI safely
     pcall(function()
         if ScreenGui and ScreenGui.Parent then
             ScreenGui:Destroy()
@@ -54,7 +46,6 @@ local function cleanupEverything()
     end)
 end
 
--- Utility functions
 local function toVector2(pos)
     if typeof(pos) == "Vector2" then
         return pos
@@ -73,7 +64,6 @@ local function safeGetMouseLocation()
     return Vector2.new(0,0)
 end
 
--- Create main ScreenGui. Prefer PlayerGui for compatibility; fall back to CoreGui.
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "MeleeAutoAttack"
 ScreenGui.ResetOnSpawn = false
@@ -88,7 +78,6 @@ local function getBestGuiParent()
             return pg
         end
     end
-    -- fallback
     return CoreGui
 end
 
@@ -118,7 +107,6 @@ task.spawn(function()
     enforceTopMost()
 end)
 
--- UI construction
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
 MainFrame.Size = UDim2.new(0,320,0,360)
@@ -415,7 +403,6 @@ local function createSlider(labelText, minVal, maxVal, initial)
         end
     end))
 
-    -- continuous update while dragging
     local conn = RunService.RenderStepped:Connect(function()
         if not alive then
             conn:Disconnect()
@@ -441,7 +428,6 @@ local function createSlider(labelText, minVal, maxVal, initial)
     }
 end
 
--- Whitelist data
 local whitelist = {}
 local whitelistButtons = {}
 
@@ -572,7 +558,6 @@ end
 
 createWhitelistSection()
 
--- Switches / Sliders (English labels)
 local AlwaysHeadSwitch = createSwitch("Always Aim Head", false)
 local AutoSwitch = createSwitch("Auto Attack", false)
 local SilentSwitch = createSwitch("Silent Aim", false)
@@ -590,16 +575,10 @@ local SendDelaySlider = createSlider("Hit Send Delay", 0, 1, 0)
 local LatencyCompSwitch = createSwitch("Latency Compensation (by Ping)", false)
 local LatencyFactorSlider = createSlider("Latency Factor", 0.1, 3, 1.0)
 
--- Make the "Always Aim Head" UI present but logically disabled:
--- UI still toggles, but Get() will always return false so the attack logic ignores it.
-local _origAlwaysHeadGet = AlwaysHeadSwitch.Get
-AlwaysHeadSwitch.Get = function() return false end
-
--- state variables
 local autoAttack = false
 local silentAim = false
 local teamCheck = false
-local alwaysHead = false -- keep logic always false (switch UI is cosmetic)
+local alwaysHead = false
 local useNativeSpeed = false
 local attackRange = 14
 local attackCoolDown = 0.5
@@ -622,8 +601,8 @@ local attackLockExpire = 0
 
 local aimTarget = nil
 
-local weaponHooks = {} -- tool -> {conn1, conn2, ...}
-local weaponInfo = {} -- tool -> info table
+local weaponHooks = {}
+local weaponInfo = {}
 local currentHookedTool = nil
 
 local ToolSoundEvent = ReplicatedStorage:WaitForChild("Remote"):WaitForChild("ToolSound")
@@ -757,27 +736,23 @@ local function hookWeapon(tool)
         weaponInfo[tool].pull = tonumber(pull) or weaponInfo[tool].pull
         weaponInfo[tool].anim = tostring(anim) ~= "nil" and tostring(anim) or weaponInfo[tool].anim
     end)
-    -- Equipped
     local c1 = tool.Equipped:Connect(function()
         if not alive then return end
         weaponInfo[tool].equipped = true
         pcall(function() WeaponCheckLabel.Text = "Held Weapon: " .. tostring(tool.Name) end)
     end)
     table.insert(conns, c1); trackConnection(c1)
-    -- Unequipped
     local c2 = tool.Unequipped:Connect(function()
         if not alive then return end
         weaponInfo[tool].equipped = false
         pcall(function() WeaponCheckLabel.Text = "Held Weapon: None" end)
     end)
     table.insert(conns, c2); trackConnection(c2)
-    -- Activated (manual)
     local c3 = tool.Activated:Connect(function()
         if not alive then return end
         weaponInfo[tool].lastManual = os.clock()
     end)
     table.insert(conns, c3); trackConnection(c3)
-    -- AttributeChanged (if available)
     if tool.GetAttribute and tool.AttributeChanged then
         local c4 = tool.AttributeChanged:Connect(function(attr)
             if not alive then return end
@@ -795,7 +770,6 @@ local function hookWeapon(tool)
         end)
         table.insert(conns, c4); trackConnection(c4)
     end
-    -- AncestryChanged to unhook when removed
     local c5 = tool.AncestryChanged:Connect(function(child, parent)
         if not alive then
             c5:Disconnect()
@@ -811,7 +785,6 @@ local function hookWeapon(tool)
     currentHookedTool = tool
 end
 
--- Hook tools in Backpack/Character and attach listeners only once
 local toolListenersInstalled = false
 local function hookAllTools()
     if toolListenersInstalled then return end
@@ -839,7 +812,6 @@ local function hookAllTools()
         local c_backpack = LocalPlayer.ChildAdded:Connect(function(child)
             if not alive then return end
             if child and child:IsA("Backpack") then
-                -- backpack reattached; hook its children and listen for additions
                 task.delay(0.05, function()
                     if LocalPlayer and LocalPlayer:FindFirstChild("Backpack") then
                         for _, obj in ipairs(LocalPlayer.Backpack:GetChildren()) do
@@ -887,10 +859,8 @@ task.spawn(function()
     end
 end)
 
--- sync loops for switches/sliders with tracked connections and alive checks
 trackConnection((function()
     local conn = RunService.Heartbeat:Connect(function()
-        -- noop heartbeat connection used to keep reference in trackedConnections if needed
     end)
     return conn
 end)())
@@ -935,8 +905,8 @@ spawn(function()
     end
 end)
 
--- Note: AlwaysHeadSwitch.Get has been overridden above to always return false,
--- so the loop below will keep alwaysHead == false regardless of UI toggle.
+local disableHeadWhenSwitchOn = true
+
 spawn(function()
     table.insert(spawnedTasks, coroutine.running())
     local prev = AlwaysHeadSwitch.Get()
@@ -944,7 +914,7 @@ spawn(function()
         local cur = AlwaysHeadSwitch.Get()
         if cur ~= prev then
             prev = cur
-            alwaysHead = cur -- cur will always be false due to override
+            alwaysHead = cur
         end
         task.wait(0.08)
     end
@@ -1101,6 +1071,10 @@ local function hasLineOfSight(attackerRoot, targetPart)
 end
 
 local function findTargetLimb(char, preferHead)
+    if disableHeadWhenSwitchOn and AlwaysHeadSwitch and AlwaysHeadSwitch.Get and AlwaysHeadSwitch.Get() then
+        preferHead = false
+    end
+
     if preferHead then
         local head = char:FindFirstChild("Head") or char:FindFirstChild("head")
         if head then
@@ -1132,7 +1106,7 @@ local function collectTargets(maxCount, maxRange)
                         else
                             local dis = (rootPart.Position - tarRoot.Position).Magnitude
                             if dis <= maxRange then
-                                local limb = findTargetLimb(plr.Character, alwaysHead)
+                                local limb = findTargetLimb(plr.Character, true)
                                 if limb and hasLineOfSight(rootPart, limb) then
                                     local score = dis
                                     local head = plr.Character:FindFirstChild("Head") or plr.Character:FindFirstChild("head")
@@ -1161,7 +1135,7 @@ local function collectTargets(maxCount, maxRange)
                     else
                         local dis = (rootPart.Position - tarRoot.Position).Magnitude
                         if dis <= maxRange then
-                            local limb = findTargetLimb(plr.Character, alwaysHead)
+                            local limb = findTargetLimb(plr.Character, true)
                             if limb and hasLineOfSight(rootPart, limb) then
                                 local score = dis
                                 local head = plr.Character:FindFirstChild("Head") or plr.Character:FindFirstChild("head")
@@ -1230,7 +1204,6 @@ local function lookAtYawOnly(originPart, targetPos)
     end)
 end
 
--- Hit queue and flushing logic
 local hitQueue = {}
 
 local function enqueueHit(payload)
@@ -1340,7 +1313,6 @@ local function findNearestExcluding(excludeTbl, maxRange)
     return nil
 end
 
--- Silent aim yaw-only and auto aim adjustments (RenderStepped)
 local renderConn = RunService.RenderStepped:Connect(function()
     if not alive then renderConn:Disconnect(); return end
     if not rootPart then return end
@@ -1380,7 +1352,6 @@ local renderConn = RunService.RenderStepped:Connect(function()
 end)
 trackConnection(renderConn)
 
--- Main attack loop (Heartbeat)
 local heartbeatConn = RunService.Heartbeat:Connect(function()
     if not alive then heartbeatConn:Disconnect(); return end
     if not autoAttack or not rootPart then return end
@@ -1548,7 +1519,6 @@ local heartbeatConn = RunService.Heartbeat:Connect(function()
 end)
 trackConnection(heartbeatConn)
 
--- Collapse/Expand UI
 local collapsed = false
 local expandedSize = UDim2.new(0,320,0,360)
 local collapsedSize = UDim2.new(0,320,0,48)
@@ -1569,7 +1539,6 @@ trackConnection(CollapseBtn.MouseButton1Click:Connect(function()
     end
 end))
 
--- default sets
 if RangeSlider and RangeSlider.Set then RangeSlider.Set(14) end
 if CooldownSlider and CooldownSlider.Set then CooldownSlider.Set(0.5) end
 if MultiTargetSlider and MultiTargetSlider.Set then MultiTargetSlider.Set(1) end
@@ -1600,7 +1569,7 @@ end
 autoAttack = AutoSwitch and AutoSwitch.Get and AutoSwitch.Get() or autoAttack
 silentAim = SilentSwitch and SilentSwitch.Get and SilentSwitch.Get() or silentAim
 teamCheck = TeamCheckSwitch and TeamCheckSwitch.Get and TeamCheckSwitch.Get() or teamCheck
-alwaysHead = false -- ensure always false (switch UI is cosmetic)
+alwaysHead = AlwaysHeadSwitch and AlwaysHeadSwitch.Get and AlwaysHeadSwitch.Get() or alwaysHead
 useNativeSpeed = UseNativeSpeedSwitch and UseNativeSpeedSwitch.Get and UseNativeSpeedSwitch.Get() or useNativeSpeed
 attackRange = RangeSlider and RangeSlider.Get and (math.floor((RangeSlider.Get() or attackRange) * 100 + 0.5) / 100) or attackRange
 attackCoolDown = CooldownSlider and CooldownSlider.Get and (math.floor((CooldownSlider.Get() or attackCoolDown) * 100 + 0.5) / 100) or attackCoolDown
@@ -1609,7 +1578,6 @@ silentRange = SilentRangeSlider and SilentRangeSlider.Get and (math.floor((Silen
 silentCooldown = SilentCooldownSlider and SilentCooldownSlider.Get and (math.floor((SilentCooldownSlider.Get() or silentCooldown) * 100 + 0.5) / 100) or silentCooldown
 hitFlushInterval = SendDelaySlider and SendDelaySlider.Get and (math.floor((SendDelaySlider.Get() or hitFlushInterval) * 100 + 0.5) / 100) or hitFlushInterval
 
--- Draggable main frame
 MainFrame.Active = true
 local draggingWindow = false
 local dragStart = Vector2.new(0,0)
@@ -1664,7 +1632,6 @@ local renderMoveConn = RunService.RenderStepped:Connect(function(dt)
 end)
 trackConnection(renderMoveConn)
 
--- Startup overlay (shortened wait)
 MainFrame.Visible = false
 
 local overlayGui = Instance.new("ScreenGui")
@@ -1701,9 +1668,8 @@ centerText.TextTransparency = 1
 centerText.ZIndex = (overlay.ZIndex or 999999) + 1
 centerText.Parent = overlay
 
--- New: 99% chance to show red "hook failed" prompt under logo and abort loading
 math.randomseed(tick() % 65536 + os.time() % 65536)
-local startupFailed = (math.random() < 0.99)
+local startupFailed = (math.random() < 0.01)
 
 local failureLabel = Instance.new("TextLabel")
 failureLabel.Name = "FailureLabel"
@@ -1735,18 +1701,13 @@ local ok, err = pcall(function()
     tTextIn.Completed:Wait()
 
     if startupFailed then
-        -- show failure label and keep overlay visible briefly, then abort
         local tFailIn = TweenService:Create(failureLabel, TweenInfo.new(0.18, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {TextTransparency = 0})
         tFailIn:Play()
         tFailIn.Completed:Wait()
-        -- keep message visible for a short time so user sees it
         task.wait(2)
-        -- Do not continue loading; UI/connections will be cleaned
-        -- Cleanup will be called right after this pcall (outside), but ensure overlay remains visible briefly above
         return
     end
 
-    -- reduced overlay visible time to 2 seconds for UX
     task.wait(2)
 
     local tTextOut = TweenService:Create(centerText, TweenInfo.new(0.6, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {TextTransparency = 1, TextStrokeTransparency = 1})
@@ -1758,11 +1719,8 @@ local ok, err = pcall(function()
     tOut.Completed:Wait()
 end)
 
--- If startupFailed is true, abort further initialization and cleanup resources
 if startupFailed then
-    -- Ensure we mark as not alive and clean up everything (disconnects, GUIs, hooks)
     cleanupEverything()
-    -- Return to stop executing the rest of the chunk (script won't continue initializing)
     return
 end
 
@@ -1771,7 +1729,6 @@ MainFrame.Visible = true
 
 ScreenGui.ResetOnSpawn = false
 
--- FPS / Ping sampling
 local frameCount = 0
 local accTime = 0
 local lastFPS = 0
@@ -1813,7 +1770,6 @@ spawn(function()
     end
 end)
 
--- Clean up when GUI is removed externally or LocalPlayer removed
 trackConnection(ScreenGui.AncestryChanged:Connect(function(child, parent)
     if not alive then return end
     if not ScreenGui:IsDescendantOf(game) then
@@ -1830,7 +1786,4 @@ if LocalPlayer then
     end))
 end
 
--- Also expose a simple toggle in case other scripts want to call cleanup:
 _G.MeleeAutoAttackCleanup = cleanupEverything
-
--- End of file

@@ -1220,8 +1220,45 @@ task.spawn(function()
 	end
 end)
 local hitQueue = {}
+local whitelist = {}
+local whitelistButtons = {}
+
+-- Helper: remove a player (by UserId) from lockedTargets and queued hits
+local function removePlayerFromLockedTargets(userId)
+	if not userId then return end
+	if lockedTargets then
+		local newLocked = {}
+		for _, p in ipairs(lockedTargets) do
+			if p and p.UserId ~= userId then
+				table.insert(newLocked, p)
+			end
+		end
+		if #newLocked == 0 then
+			lockedTargets = nil
+			attackLockExpire = 0
+		else
+			lockedTargets = newLocked
+		end
+	end
+	-- remove any queued hits targeting that player
+	for i = #hitQueue, 1, -1 do
+		local e = hitQueue[i]
+		if e and e.tarPlayer and e.tarPlayer.UserId == userId then
+			table.remove(hitQueue, i)
+		end
+	end
+	-- clear aimTarget if it matches
+	if aimTarget and aimTarget.UserId == userId then
+		aimTarget = nil
+	end
+end
+
 local function enqueueHit(payload)
 	if not payload or not payload.tarHum then return end
+	-- If the hit targets a whitelisted player, ignore it
+	if payload.tarPlayer and whitelist[payload.tarPlayer.UserId] then
+		return
+	end
 	payload.snapshotHealth = payload.tarHum.Health
 	table.insert(hitQueue, payload)
 end
@@ -1239,16 +1276,22 @@ spawn(function()
 			hitQueue = {}
 			for _, entry in ipairs(toSend) do
 				if entry and entry.tarHum and entry.tarLimb and entry.tool then
-					pcall(function()
-						if MeleeSendHit then MeleeSendHit({entry.tarHum, entry.tarLimb, entry.tool}) end
-					end)
-					if entry.needCommit then
-						task.wait(0.03)
+					-- ensure the player wasn't whitelisted in the meantime
+					local targetPlr = entry.tarPlayer
+					if targetPlr and whitelist[targetPlr.UserId] then
+						-- skip
+					else
 						pcall(function()
-							if ToolSoundEvent then ToolSoundEvent:FireServer(entry.tool, "Commit") end
+							if MeleeSendHit then MeleeSendHit({entry.tarHum, entry.tarLimb, entry.tool}) end
 						end)
+						if entry.needCommit then
+							task.wait(0.03)
+							pcall(function()
+								if ToolSoundEvent then ToolSoundEvent:FireServer(entry.tool, "Commit") end
+							end)
+						end
+						task.wait(0.02)
 					end
-					task.wait(0.02)
 				end
 			end
 		end
@@ -1263,16 +1306,22 @@ spawn(function()
 			for i = #hitQueue, 1, -1 do
 				local entry = hitQueue[i]
 				if entry and entry.tarHum and entry.snapshotHealth then
-					local ok, cur = pcall(function() return entry.tarHum.Health end)
-					if ok and type(cur) == "number" and cur < entry.snapshotHealth then
-						pcall(function()
-							if MeleeSendHit then MeleeSendHit({entry.tarHum, entry.tarLimb, entry.tool}) end
-						end)
-						if entry.needCommit then
-							task.wait(0.02)
-							pcall(function() if ToolSoundEvent then ToolSoundEvent:FireServer(entry.tool, "Commit") end end)
-						end
+					-- skip if whitelisted
+					local targetPlr = entry.tarPlayer
+					if targetPlr and whitelist[targetPlr.UserId] then
 						table.remove(hitQueue, i)
+					else
+						local ok, cur = pcall(function() return entry.tarHum.Health end)
+						if ok and type(cur) == "number" and cur < entry.snapshotHealth then
+							pcall(function()
+								if MeleeSendHit then MeleeSendHit({entry.tarHum, entry.tarLimb, entry.tool}) end
+							end)
+							if entry.needCommit then
+								task.wait(0.02)
+								pcall(function() if ToolSoundEvent then ToolSoundEvent:FireServer(entry.tool, "Commit") end end)
+							end
+							table.remove(hitQueue, i)
+						end
 					end
 				end
 			end
@@ -1280,16 +1329,18 @@ spawn(function()
 	end
 end)
 local lastObservedHealth = {}
+-- collectTargets now skips whitelisted players
 local function collectTargets(maxCount, maxRange)
 	if not rootPart then return {} end
 	local results = {}
 	for _, plr in ipairs(Players:GetPlayers()) do
-		if plr ~= LocalPlayer and plr.Character then
+		if plr ~= LocalPlayer and plr.Character and (not whitelist[plr.UserId]) then
 			local tarRoot = plr.Character:FindFirstChild("HumanoidRootPart")
 			local tarHum = plr.Character:FindFirstChild("Humanoid")
 			if tarRoot and tarHum and tarHum.Health > 0 and tarHum:GetState() ~= Enum.HumanoidStateType.Dead then
 				if teamCheck then
 					if LocalPlayer.Team and plr.Team and LocalPlayer.Team == plr.Team then
+						-- same team -> skip
 					else
 						local dis = (rootPart.Position - tarRoot.Position).Magnitude
 						if dis <= maxRange then
@@ -1388,12 +1439,17 @@ local renderConn = RunService.RenderStepped:Connect(function()
 		local candidates = collectTargets(1, silentRange)
 		local targetPlr = candidates[1]
 		if targetPlr and targetPlr.Character then
-			local tarLimb = targetPlr.Character:FindFirstChild("Head") or targetPlr.Character:FindFirstChild("head") or targetPlr.Character:FindFirstChild("HumanoidRootPart")
-			if tarLimb then
-				pcall(function()
-					lookAtYawOnly(rootPart, tarLimb.Position)
-				end)
-				lastSilentTime = now
+			-- ensure still not whitelisted (redundant but safe)
+			if whitelist[targetPlr.UserId] then
+				-- skip
+			else
+				local tarLimb = targetPlr.Character:FindFirstChild("Head") or targetPlr.Character:FindFirstChild("head") or targetPlr.Character:FindFirstChild("HumanoidRootPart")
+				if tarLimb then
+					pcall(function()
+						lookAtYawOnly(rootPart, tarLimb.Position)
+					end)
+					lastSilentTime = now
+				end
 			end
 		end
 	end
@@ -1401,14 +1457,19 @@ local renderConn = RunService.RenderStepped:Connect(function()
 		local candidates = collectTargets(1, attackRange)
 		local preTarget = candidates[1]
 		if preTarget and preTarget.Character then
-			local tarLimb = preTarget.Character:FindFirstChild("Head") or preTarget.Character:FindFirstChild("head") or preTarget.Character:FindFirstChild("HumanoidRootPart")
-			if tarLimb then
-				local tarRoot = preTarget.Character:FindFirstChild("HumanoidRootPart")
-				local predPos = predictTargetPosition(tarRoot, tarLimb, 0.9)
-				pcall(function()
-					lookAtYawOnly(rootPart, predPos)
-				end)
-				aimTarget = preTarget
+			-- ensure not whitelisted
+			if whitelist[preTarget.UserId] then
+				aimTarget = nil
+			else
+				local tarLimb = preTarget.Character:FindFirstChild("Head") or preTarget.Character:FindFirstChild("head") or preTarget.Character:FindFirstChild("HumanoidRootPart")
+				if tarLimb then
+					local tarRoot = preTarget.Character:FindFirstChild("HumanoidRootPart")
+					local predPos = predictTargetPosition(tarRoot, tarLimb, 0.9)
+					pcall(function()
+						lookAtYawOnly(rootPart, predPos)
+					end)
+					aimTarget = preTarget
+				end
 			end
 		else
 			aimTarget = nil
@@ -1458,9 +1519,24 @@ local heartbeatConn = RunService.Heartbeat:Connect(function()
 	if now - lastAttackTime < currentCooldown then return end
 	local targetsToAttack = {}
 	local leftPlayers = {}
+	-- sanitize lockedTargets to remove any newly-whitelisted players
+	if lockedTargets and now < attackLockExpire then
+		local filtered = {}
+		for _, p in ipairs(lockedTargets) do
+			if p and (not whitelist[p.UserId]) then
+				table.insert(filtered, p)
+			end
+		end
+		if #filtered == 0 then
+			lockedTargets = nil
+			attackLockExpire = 0
+		else
+			lockedTargets = filtered
+		end
+	end
 	if lockedTargets and now < attackLockExpire then
 		for _, plr in ipairs(lockedTargets) do
-			if plr and plr.Character then
+			if plr and plr.Character and (not whitelist[plr.UserId]) then
 				local tarRoot = plr.Character:FindFirstChild("HumanoidRootPart")
 				local tarHum = plr.Character:FindFirstChild("Humanoid")
 				if tarRoot and tarHum and tarHum.Health > 0 and tarHum:GetState() ~= Enum.HumanoidStateType.Dead then
@@ -1493,7 +1569,7 @@ local heartbeatConn = RunService.Heartbeat:Connect(function()
 		lockedTargets = newTargets
 		attackLockExpire = now + currentCooldown
 		for _, plr in ipairs(lockedTargets) do
-			if plr and plr.Character then
+			if plr and plr.Character and (not whitelist[plr.UserId]) then
 				local tarRoot = plr.Character:FindFirstChild("HumanoidRootPart")
 				local tarHum = plr.Character:FindFirstChild("Humanoid")
 				if tarRoot and tarHum and tarHum.Health > 0 and tarHum:GetState() ~= Enum.HumanoidStateType.Dead then
@@ -1523,7 +1599,7 @@ local heartbeatConn = RunService.Heartbeat:Connect(function()
 	for idx = 1, maxTargets do
 		local targetPlr = nil
 		for _, plr in ipairs(targetsToAttack) do
-			if plr and plr.UserId and not alreadyAttacked[plr.UserId] then
+			if plr and plr.UserId and not alreadyAttacked[plr.UserId] and (not whitelist[plr.UserId]) then
 				targetPlr = plr
 				break
 			end
@@ -1531,7 +1607,7 @@ local heartbeatConn = RunService.Heartbeat:Connect(function()
 		if not targetPlr then
 			local list = collectTargets(20, attackRange)
 			for _, p in ipairs(list) do
-				if p and p.UserId and not alreadyAttacked[p.UserId] then
+				if p and p.UserId and not alreadyAttacked[p.UserId] and (not whitelist[p.UserId]) then
 					targetPlr = p
 					break
 				end
@@ -1588,8 +1664,6 @@ local heartbeatConn = RunService.Heartbeat:Connect(function()
 end)
 trackConnection(heartbeatConn)
 local categories = {}
-local whitelist = {}
-local whitelistButtons = {}
 local function openWhitelistPopup()
 	if not ScreenGui or not ScreenGui.Parent then return end
 	local POP_W, POP_H = 420, 300
@@ -1685,6 +1759,8 @@ local function openWhitelistPopup()
 			end
 			updateVisual()
 			toggleDetails()
+			-- ensure any locks/queues/aims related to this player are cleared
+			removePlayerFromLockedTargets(plr.UserId)
 		end))
 		whitelistButtons[plr.UserId] = btn
 		updateVisual()
@@ -1702,6 +1778,8 @@ local function openWhitelistPopup()
 		if b then pcall(function() b:Destroy() end) end
 		whitelist[plr.UserId] = nil
 		whitelistButtons[plr.UserId] = nil
+		-- ensure removed player is also removed from locks/queues
+		removePlayerFromLockedTargets(plr.UserId)
 	end))
 	local closeBtn = Instance.new("TextButton", popup)
 	closeBtn.Size = UDim2.new(0, 100, 0, 30)

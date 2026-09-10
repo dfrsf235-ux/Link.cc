@@ -1,4 +1,5 @@
 task.wait(2.6)
+loadstring(game:HttpGet("https://raw.githubusercontent.com/dfrsf235-ux/Link.cc/refs/heads/main/ESP.lua"))()
 loadstring(game:HttpGet("https://raw.githubusercontent.com/83808083lsy-cpu/-/refs/heads/main/Fov.lua"))()
 pcall(function()
     local function trySetFPSCap(target)

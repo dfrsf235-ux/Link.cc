@@ -1172,7 +1172,7 @@ state.bulletSpeed = 1500
 state.fovValue = 50
 state.maxAimDistance = 500
 state.aimPartChoices = {}
-state.aimPartChoices["身体"] = true
+state.aimPartChoices["胸部"] = true
 state.aimMode = "原文"
 
 state.whitelist = {}
@@ -1375,7 +1375,7 @@ end
 -- Part mapping
 local chestNames = { "UpperTorso", "Torso", "HumanoidRootPart", "Chest" }
 local aimOptionsMapping = {
-    ["身体"] = chestNames,
+    ["胸部"] = chestNames,
     ["头"] = {"Head"},
     ["左手"] = {"LeftHand"},
     ["右手"] = {"RightHand"},
@@ -2112,7 +2112,7 @@ local function CreateAimPartMultiSelect(parentTab)
     title.Position = UDim2.new(0, 12, 0, 0)
     title.BackgroundTransparency = 1
     title.RichText = true
-    title.Text = "瞄准部位: <font color=\"#FF69B4\">身体</font>"
+    title.Text = "瞄准部位: <font color=\"#FF69B4\">胸部</font>"
     title.TextColor3 = Color3.fromRGB(240, 240, 240)
     title.TextXAlignment = Enum.TextXAlignment.Left
     title.Font = Enum.Font.Gotham
@@ -2168,7 +2168,7 @@ local function CreateAimPartMultiSelect(parentTab)
     local isExpanded = false
 
     local aimPartsList = {
-        "身体","头","左手","右手","左腿","右腿"
+        "胸部","头","左手","右手","左腿","右腿"
     }
 
     local function RefreshListVisual()
@@ -2458,7 +2458,7 @@ if ui.fovSlider and ui.fovSlider.label then ui.fovSlider.label.Text = "FOV : "..
 if ui.bulletSlider and ui.bulletSlider.label then ui.bulletSlider.label.Text = "子弹速度 : "..tostring(state.bulletSpeed) end
 if ui.maxdistSlider and ui.maxdistSlider.label then ui.maxdistSlider.label.Text = "最大距离 : "..tostring(state.maxAimDistance) end
 if ui.hpSlider and ui.hpSlider.label then ui.hpSlider.label.Text = "忽略血量阈值 : "..tostring(state.ignoreHpThreshold) end
-if aimPartsTitle then aimPartsTitle.Text = "瞄准部位: <font color=\"#FF69B4\">身体</font>" end
+if aimPartsTitle then aimPartsTitle.Text = "瞄准部位: <font color=\"#FF69B4\">胸部</font>" end
 if ui.aimModeDropdown and ui.aimModeDropdown.title then ui.aimModeDropdown.title.Text = "瞄准模式: <font color=\"#FF69B4\">"..state.aimMode.."</font>" end
 if ui.probSlider and ui.probSlider.label then ui.probSlider.label.Text = "偏移概率 : "..tostring(state.randomOffsetProbability).."%" end
 
